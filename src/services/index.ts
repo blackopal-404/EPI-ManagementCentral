@@ -50,9 +50,28 @@ export interface ProductFilters {
   sort?: "nombre" | "codigo" | "categoria" | "reciente";
 }
 
+const PRODUCT_IMAGE_OVERRIDES_KEY = "epicontrol:product-image-overrides";
+function readProductImageOverrides(): Record<string, string> {
+  if (typeof window === "undefined") return {};
+  try { return JSON.parse(localStorage.getItem(PRODUCT_IMAGE_OVERRIDES_KEY) ?? "{}") as Record<string, string>; }
+  catch { return {}; }
+}
 export const productService = {
+  async saveProductImage(productId: string, imageDataUrl: string): Promise<void> {
+    if (typeof window === "undefined") throw new Error("La edición de imágenes requiere un navegador.");
+    const overrides = readProductImageOverrides();
+    overrides[productId] = imageDataUrl;
+    localStorage.setItem(PRODUCT_IMAGE_OVERRIDES_KEY, JSON.stringify(overrides));
+  },
   async getProducts(filters: ProductFilters = {}): Promise<Product[]> {
-    let list = clone(mockProducts);
+    const imageOverrides = readProductImageOverrides();
+    let list = clone(mockProducts).map((product) => {
+      const image = imageOverrides[product.id];
+      if (!image) return product;
+      const primary = product.images.find((item) => item.isPrimary) ?? product.images[0];
+      const replacement = { id: `admin-image-${product.id}`, url: image, alt: `${product.name} — imagen agregada desde administración`, isPrimary: true };
+      return { ...product, images: [replacement, ...product.images.filter((item) => item.id !== primary?.id).map((item) => ({ ...item, isPrimary: false }))] };
+    });
     const q = filters.search?.trim().toLowerCase();
     if (q) {
       list = list.filter((p) =>
@@ -82,10 +101,10 @@ export const productService = {
     return delay(list);
   },
   async getProductById(id: string): Promise<Product | undefined> {
-    return delay(clone(mockProducts.find((p) => p.id === id)));
+    return (await this.getProducts()).find((product) => product.id === id);
   },
   async getProductByCode(code: string): Promise<Product | undefined> {
-    return delay(clone(mockProducts.find((p) => p.code.toLowerCase() === code.toLowerCase())));
+    return (await this.getProducts()).find((product) => product.code.toLowerCase() === code.toLowerCase());
   },
   async getFilterOptions() {
     return delay({
@@ -206,7 +225,7 @@ export const codeService = {
     if (!value) return null;
     if (value.toUpperCase().startsWith("EQUIPMENT:")) return value.slice(10).trim();
     const match = value.match(/\/equipment\/([^/?#]+)/i);
-    if (match) return decodeURIComponent(match[1]);
+    if (match?.[1]) return decodeURIComponent(match[1]);
     return value;
   },
   /** Escaneo simulado para pruebas locales. */
@@ -339,10 +358,10 @@ export const dashboardService = {
         (new Date(e.nextInspectionDate).getTime() - today.getTime()) / 86_400_000,
       );
       if (diff < 0) return;
-      if (diff <= 7) buckets[0].total += 1;
-      else if (diff <= 15) buckets[1].total += 1;
-      else if (diff <= 30) buckets[2].total += 1;
-      else if (diff <= 90) buckets[3].total += 1;
+      if (diff <= 7 && buckets[0]) buckets[0].total += 1;
+      else if (diff <= 15 && buckets[1]) buckets[1].total += 1;
+      else if (diff <= 30 && buckets[2]) buckets[2].total += 1;
+      else if (diff <= 90 && buckets[3]) buckets[3].total += 1;
     });
     return delay(buckets);
   },

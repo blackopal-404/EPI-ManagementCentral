@@ -22,11 +22,13 @@ function ProductDetailPage() {
   const p = product.data;
   if (!p) return <div className="panel p-8 text-center"><h1 className="font-bold">Producto no encontrado</h1><Link to="/productos" className="mt-3 inline-block text-primary">Volver al catálogo</Link></div>;
   const primary = p.images.find((i) => i.isPrimary) ?? p.images[0];
+  const primaryImageUrl = primary?.url ?? "/epp-harness.jpg";
+  const primaryImageAlt = primary?.alt ?? `${p.name} — imagen pendiente de agregar`;
 
   return <div className="space-y-5">
     <Link to="/productos" className="inline-flex items-center gap-2 text-sm font-semibold text-primary"><ArrowLeft className="h-4 w-4" /> Catálogo</Link>
     <div className="grid gap-5 lg:grid-cols-[.9fr_1.1fr]">
-      <div className="panel overflow-hidden"><img src={primary.url} alt={primary.alt} className="aspect-[4/3] w-full object-cover" /></div>
+      <div className="panel overflow-hidden"><img src={primaryImageUrl} alt={primaryImageAlt} className="aspect-[4/3] w-full object-cover" /></div>
       <div>
         <p className="mono-code text-xs text-muted-foreground">{p.code} · {p.model}</p>
         <h1 className="mt-2 font-display text-3xl font-extrabold">{p.name}</h1>

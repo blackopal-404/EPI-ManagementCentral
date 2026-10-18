@@ -7,6 +7,8 @@ import { StatusPill, productStatusMeta } from "@/components/common/StatusBadge";
 export function ProductCard({ product }: { product: Product }) {
   const primary = product.images.find((i) => i.isPrimary) ?? product.images[0];
   const meta = productStatusMeta[product.status];
+  const imageUrl = primary?.url || "/epp-harness.jpg";
+  const imageAlt = primary?.alt || `${product.name} — imagen pendiente de agregar`;
 
   return (
     <article className="group panel flex flex-col overflow-hidden transition-shadow hover:shadow-panel">
@@ -18,8 +20,8 @@ export function ProductCard({ product }: { product: Product }) {
       >
         <div className="aspect-[4/3] overflow-hidden bg-muted">
           <img
-            src={primary.url}
-            alt={primary.alt}
+            src={imageUrl}
+            alt={imageAlt}
             loading="lazy"
             width={1024}
             height={1024}

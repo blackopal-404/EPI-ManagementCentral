@@ -72,7 +72,7 @@ export function EquipmentStatusBadge({
   className?: string;
 }) {
   const meta = equipmentStatusMeta[status];
-  return <StatusPill label={meta.label} tone={meta.tone} size={size} className={className} />;
+  return <StatusPill label={meta.label} tone={meta.tone} {...(size ? { size } : {})} {...(className ? { className } : {})} />;
 }
 
 export function InspectionResultBadge({ result }: { result: InspectionResult }) {

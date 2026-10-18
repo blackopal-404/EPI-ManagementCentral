@@ -75,8 +75,9 @@ const rows: Row[] = [
 
 const counters: Record<string, number> = {};
 
-export const mockEquipment: Equipment[] = import.meta.env.DEV ? rows.map((row, i) => {
+export const mockEquipment: Equipment[] = import.meta.env.DEV ? rows.flatMap((row, i) => {
   const product = mockProducts[row.productIndex];
+  if (!product) return [];
   const prefix = prefixes[product.categoryId] ?? "EPI";
   counters[prefix] = (counters[prefix] ?? 0) + 1;
   const internalCode = `${prefix}-${String(counters[prefix]).padStart(4, "0")}`;
@@ -90,14 +91,14 @@ export const mockEquipment: Equipment[] = import.meta.env.DEV ? rows.map((row, i
     manufacturingDate: `${2022 + (i % 4)}-0${(i % 9) + 1}-1${i % 9}`,
     purchaseDate: `${2023 + (i % 3)}-0${(i % 9) + 1}-2${i % 8}`,
     commissioningDate: `${2023 + (i % 3)}-1${i % 2}-0${(i % 8) + 1}`,
-    location: locations[i % locations.length],
-    assignedUserId: row.userId,
-    lastInspectionDate: row.last,
-    nextInspectionDate: row.next,
+    location: locations[i % locations.length] ?? "Bodega principal",
+    ...(row.userId ? { assignedUserId: row.userId } : {}),
+    ...(row.last ? { lastInspectionDate: row.last } : {}),
+    ...(row.next ? { nextInspectionDate: row.next } : {}),
     serviceLife: product.serviceLife,
-    notes: row.notes,
+    ...(row.notes ? { notes: row.notes } : {}),
     qrCode: `EQUIPMENT:${internalCode}`,
-    dataMatrixCode: i < 4 ? `${product.model}-${2024 + (i % 3)}-${String(41000 + i * 137).slice(0, 5)}` : undefined,
+    ...(i < 4 ? { dataMatrixCode: `${product.model}-${2024 + (i % 3)}-${String(41000 + i * 137).slice(0, 5)}` } : {}),
     createdAt: "2025-01-10T09:00:00Z",
     updatedAt: "2026-09-01T09:00:00Z",
   };

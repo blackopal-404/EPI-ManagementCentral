@@ -86,7 +86,6 @@ export function CameraQrScanner({
   function stop() {
     controlsRef.current?.stop();
     controlsRef.current = null;
-    readerRef.current?.reset();
     readerRef.current = null;
     if (videoRef.current) videoRef.current.srcObject = null;
     setRunning(false);

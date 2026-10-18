@@ -2,7 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useState, type ReactNode
 
 export type AppUser = { name: string; email: string; picture?: string; role: "magna" | "usuario" };
 const AUTH_KEY = "sgh:auth";
-const MAGNA_EMAILS = (import.meta.env.VITE_MAGNA_EMAILS ?? "").split(",").map((x: string) => x.trim().toLowerCase()).filter(Boolean);
+const MAGNA_EMAILS = (import.meta.env["VITE_MAGNA_EMAILS"] ?? "").split(",").map((x: string) => x.trim().toLowerCase()).filter(Boolean);
 
 function readSession(): AppUser | null {
   if (typeof window === "undefined") return null;
@@ -19,13 +19,14 @@ export function saveSession(user: AppUser) { localStorage.setItem(AUTH_KEY, JSON
 export function clearSession() { localStorage.removeItem(AUTH_KEY); window.dispatchEvent(new Event("sgh-auth")); }
 
 function decodeCredential(credential: string): { name?: string; email?: string; picture?: string } {
-  try { const payload = credential.split(".")[1]; return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))); } catch { return {}; }
+  try { const payload = credential.split(".")[1]; if (!payload) return {}; return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))); } catch { return {}; }
 }
 
 export async function handleGoogleCredential(credential: string) {
   const data = decodeCredential(credential);
   if (!data.email) throw new Error("Google no devolvió un correo válido.");
-  const user: AppUser = { name: data.name ?? data.email.split("@")[0], email: data.email, picture: data.picture, role: isMagnaEmail(data.email) ? "magna" : "usuario" };
+  const email = data.email;
+  const user: AppUser = { name: data.name || email.split("@")[0] || email, email, ...(data.picture ? { picture: data.picture } : {}), role: isMagnaEmail(email) ? "magna" : "usuario" };
   saveSession(user);
   return user;
 }
@@ -45,7 +46,7 @@ export async function loadGoogleIdentityScript() {
 }
 
 export async function renderGoogleButton(container: HTMLElement, onCredential: (credential: string) => void) {
-  const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
+  const clientId = import.meta.env["VITE_GOOGLE_CLIENT_ID"];
   if (!clientId) throw new Error("Falta VITE_GOOGLE_CLIENT_ID en .env.local. Crea un Client ID OAuth de tipo Web en Google Cloud.");
   await loadGoogleIdentityScript();
   if (!window.google) throw new Error("Google Identity Services no está disponible.");

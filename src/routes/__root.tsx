@@ -40,12 +40,13 @@ function NotFoundComponent() {
   );
 }
 
-function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
-  console.error(error);
+function ErrorComponent({ error, reset }: { error: unknown; reset: () => void }) {
+  const safeError = error instanceof Error ? error : new Error(String(error));
+  console.error(safeError);
   const router = useRouter();
   useEffect(() => {
-    reportRuntimeError(error, { boundary: "tanstack_root_error_component" });
-  }, [error]);
+    reportRuntimeError(safeError, { boundary: "tanstack_root_error_component" });
+  }, [safeError]);
 
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
