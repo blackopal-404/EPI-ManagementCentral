@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import { ClipboardCheck, FileBarChart, LayoutDashboard, Menu, Package, ScanLine, Search, Settings, Tag, LogOut, FileText, Warehouse, ShoppingCart } from "lucide-react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
-import { GlobalSearch, SearchTrigger } from "./GlobalSearch";
+import { GlobalSearch, SearchTrigger } from "../layout/GlobalSearch";
 import { useAuth } from "@/lib/auth";
 
 const nav = [

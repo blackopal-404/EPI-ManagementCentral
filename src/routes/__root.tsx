@@ -84,13 +84,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "EPIControl — Gestión y trazabilidad de EPP/EPI" },
+      { title: "EPI-Central Management" },
       {
         name: "description",
         content:
           "Sistema central para controlar equipos de protección personal e industrial: catálogo técnico, identificación por código, inventario e inspecciones.",
       },
-      { property: "og:title", content: "EPIControl — Gestión y trazabilidad de EPP/EPI" },
+      { property: "og:title", content: "EPI-Central Management" },
       {
         property: "og:description",
         content:
@@ -107,7 +107,10 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
         rel: "stylesheet",
         href: "https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700;800&family=Barlow:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap",
       },
-      { rel: "icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" },
+      { rel: "alternate icon", href: "/favicon.ico", type: "image/x-icon" },
+      { rel: "apple-touch-icon", href: "/favicon.svg" },
+      { rel: "manifest", href: "/manifest.json" },
     ],
   }),
   shellComponent: RootShell,
