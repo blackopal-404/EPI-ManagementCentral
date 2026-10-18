@@ -84,8 +84,8 @@ export function AdminShell({ children }: { children: ReactNode }) {
           <div className="flex min-h-14 items-center gap-3 px-4 py-2 sm:px-6">
             <Sheet open={open} onOpenChange={setOpen}>
               <SheetTrigger className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border lg:hidden" aria-label="Abrir menú de administración"><Menu className="h-5 w-5" /></SheetTrigger>
-              <SheetContent side="left" className="w-[86vw] max-w-xs border-r-4 border-primary/70 bg-sidebar text-sidebar-foreground">
-                <SheetHeader className="mb-4"><SheetTitle className="flex items-center gap-2 text-left text-sidebar-foreground"><ShieldCheck className="h-5 w-5 text-primary" /> Administración · Magna</SheetTitle></SheetHeader>
+              <SheetContent side="left" className="flex h-dvh max-h-dvh w-[86vw] max-w-xs flex-col overflow-y-auto border-r-4 border-primary/70 bg-sidebar text-sidebar-foreground">
+  <SheetHeader className="mb-4"><SheetTitle className="flex items-center gap-2 text-left text-sidebar-foreground"><ShieldCheck className="h-5 w-5 text-primary" /> Administración · Magna</SheetTitle></SheetHeader>
                 <div className="px-1 pb-6"><NavList onNavigate={() => setOpen(false)} /></div>
                 <Link to="/" onClick={() => setOpen(false)} className="mt-4 flex items-center gap-2 rounded-lg border border-sidebar-border px-3 py-2.5 text-sm font-semibold"><ArrowLeft className="h-4 w-4" />Volver a la aplicación</Link>
               </SheetContent>
