@@ -1,108 +1,71 @@
-## Create-React-App-Lambda
+# EPIControl / Safety Gear Hub
 
-This project is a reference demo showing you how to use [Create React App v3](https://github.com/facebookincubator/create-react-app) and [netlify-lambda v1](https://github.com/netlify/netlify-lambda) together in a [Netlify Dev](https://www.netlify.com/docs/cli/?utm_source=github&utm_medium=swyx-CRAL&utm_campaign=devex#netlify-dev-beta) workflow. You can clone this and immediately be productive with a React app with serverless Netlify Functions in the same repo. Alternatively you can deploy straight to Netlify with this one-click Deploy:
+> **Requisitos de entorno:** usa Node.js 20.19+ o 22.12+ (recomendado Node.js 22.12 o superior) y npm actualizado. EPIControl utiliza Vite 8 para mantener compatibilidad con la versión actual de TanStack Start.
 
 
-[![Deploy to Netlify](https://www.netlify.com/img/deploy/button.svg?utm_source=github&utm_medium=swyx-CRAL&utm_campaign=devex)](https://app.netlify.com/start/deploy?repository=https://github.com/netlify/create-react-app-lambda&utm_source=github&utm_medium=swyx-CRAL&utm_campaign=devex)
+Aplicación independiente para gestión, control y trazabilidad de EPP/EPI. La V1 funciona localmente con Node.js y Mock Data; XAMPP/MySQL queda reservado para la siguiente fase.
 
-> ⚠️NOTE: You may not need this project at all. [Netlify Dev](https://github.com/netlify/netlify-dev-plugin) works with `create-react-app` out of the box! Only use `netlify-lambda` if you need a build step for your functions, eg if you want to use Babel or TypeScript ([see its README for details](https://github.com/netlify/netlify-lambda/blob/master/README.md#netlify-lambda)).
+## Desarrollo local
 
-## Project Setup
-
-**Source**: The main addition to base Create-React-App is a new folder: `src/lambda`. This folder is specified and can be changed in the `package.json` script: `"build:lambda": "netlify-lambda build src/lambda"`.
-
-**Dist**: Each JavaScript file in there will be built for Netlify Function deployment in `/built-lambda`, specified in [`netlify.toml`](https://www.netlify.com/docs/netlify-toml-reference/?utm_source=github&utm_medium=swyx-CRAL&utm_campaign=devex).
-
-As an example, we've included a small `src/lambda/hello.js` function, which will be deployed to `/.netlify/functions/hello`. We've also included an async lambda example using async/await syntax in `async-dadjoke.js`.
-
-## Video
-
-Learn how to set this up yourself (and why everything is the way it is) from scratch in a video: https://www.youtube.com/watch?v=3ldSM98nCHI
-
-## Babel/webpack compilation
-
-All functions (inside `src/lambda`) are compiled with webpack using Babel, so you can use modern JavaScript, import npm modules, etc., without any extra setup.
-
-## Local Development
-
-```bash
-## prep steps for first time users
-npm i -g netlify-cli # Make sure you have the [Netlify CLI](https://github.com/netlify/cli) installed
-git clone https://github.com/netlify/create-react-app-lambda ## clone this repo
-cd create-react-app-lambda ## change into this repo
-yarn # install all dependencies
-
-## done every time you start up this project
-ntl dev ## nice shortcut for `netlify dev`, starts up create-react-app AND a local Node.js server for your Netlify functions
+```powershell
+npm install
+npm run dev
 ```
 
-This fires up [Netlify Dev](https://www.netlify.com/docs/cli/?utm_source=github&utm_medium=swyx-CRAL&utm_campaign=devex#netlify-dev-beta), which:
+Abrir `http://localhost:8080`.
 
-- Detects that you are running a `create-react-app` project and runs the npm script that contains `react-scripts start`, which in this project is the `start` script
-- Detects that you use `netlify-lambda` as a [function builder](https://github.com/netlify/netlify-dev-plugin/#function-builders-function-builder-detection-and-relationship-with-netlify-lambda), and runs the npm script that contains `netlify-lambda build`, which in this project is the `build:lambda` script.
+## Acceso con Google
 
-You can view the project locally via Netlify Dev, via `localhost:8888`.
+La aplicación utiliza Google Identity Services para el login de producción. Crea `.env.local` a partir de `.env.example` y define:
 
-Each function will be available at the same port as well:
-
-- `http://localhost:8888/.netlify/functions/hello` and 
-- `http://localhost:8888/.netlify/functions/async-dadjoke`
-
-## Deployment
-
-During deployment, this project is configured, inside `netlify.toml` to run the build `command`: `yarn build`.
-
-`yarn build` corresponds to the npm script `build`, which uses `npm-run-all` (aka `run-p`) to concurrently run `"build:app"` (aka `react-scripts build`) and `build:lambda` (aka `netlify-lambda build src/lambda`).
-
-## Typescript
-
-<details>
-  <summary>
-    <b id="typescript">Click for instructions</b>
-  </summary>
-
-You can use Typescript in both your frontend React code (with `react-scripts` v2.1+) and your serverless functions (with `netlify-lambda` v1.1+). Follow these instructions:
-
-1. `yarn add -D typescript @types/node @types/react @types/react-dom @babel/preset-typescript @types/aws-lambda`
-2. convert `src/lambda/hello.js` to `src/lambda/hello.ts`
-3. use types in your event handler:
-
-```ts
-import { Handler, Context, Callback, APIGatewayEvent } from 'aws-lambda'
-
-interface HelloResponse {
-  statusCode: number
-  body: string
-}
-
-const handler: Handler = (event: APIGatewayEvent, context: Context, callback: Callback) => {
-  const params = event.queryStringParameters
-  const response: HelloResponse = {
-    statusCode: 200,
-    body: JSON.stringify({
-      msg: `Hello world ${Math.floor(Math.random() * 10)}`,
-      params,
-    }),
-  }
-
-  callback(undefined, response)
-}
-
-export { handler }
+```env
+VITE_GOOGLE_CLIENT_ID=tu-client-id.apps.googleusercontent.com
+VITE_MAGNA_EMAILS=tu-correo@gmail.com
 ```
 
-rerun and see it work!
+En Google Cloud Console, el origen autorizado de desarrollo debe incluir `http://localhost:8080` y el dominio de producción cuando exista. El botón **Entrar como Magna (solo local)** únicamente aparece en desarrollo para facilitar las pruebas; no sustituye la autenticación real.
 
-You are free to set up your `tsconfig.json` and `tslint` as you see fit.
+El rol Magna se asigna por correo autorizado. En producción la autorización definitiva debe validarse también en el backend; ocultar una ruta en React no constituye una barrera de seguridad.
 
-</details>
+## Módulos nuevos de esta V1
 
-**If you want to try working in Typescript on the client and lambda side**: There are a bunch of small setup details to get right. Check https://github.com/sw-yx/create-react-app-lambda-typescript for a working starter.
+- **Bodega (Magna):** inventario de distribución con existencia, stock mínimo, costo, venta, margen, ubicación y proveedor. Ahora incluye plazo de reposición, stock de seguridad, stock máximo opcional, compra mínima, múltiplo de compra y estimación manual de demanda. Los cambios se conservan en `localStorage` mientras usamos Mock Data.
+- **Planificador de compras (Magna):** calcula sugerencias por horizonte de 30, 60, 90 o 180 días o por punto de reposición; permite ajustar cantidades, introducir presupuesto, simular multiplicadores de demanda y exportar el plan a CSV. No crea órdenes de compra ni modifica existencias.
+- **Monedas:** HNL es la moneda predeterminada. Los importes en USD/EUR se mantienen separados y no se suman al presupuesto HNL hasta incorporar un tipo de cambio documentado.
+- **Cotizaciones:** carrito interno con productos de bodega, cantidades, datos del cliente y documento imprimible A4 con imagen, descripción, precio unitario y total por cantidad. Desde el diálogo de impresión del navegador se puede guardar como PDF.
+- **QR/Data Matrix:** lector real mediante cámara con `BarcodeDetector` del navegador, además de simulación y búsqueda manual. En Chrome/Edge de Android funciona con la cámara trasera cuando el sitio se sirve en `localhost` o HTTPS. Si el navegador no implementa `BarcodeDetector`, se mantiene el ingreso manual.
+- **Login:** Google Identity Services + rol Magna por correo autorizado.
+- **Responsive:** navegación móvil, tablas con scroll horizontal y formularios adaptados a pantallas pequeñas.
 
-## Routing and authentication with Netlify Identity
+## Producción
 
-For a full demo of routing and authentication, check this branch: https://github.com/netlify/create-react-app-lambda/pull/18 This example will not be maintained but may be helpful.
+```powershell
+npm run build
+npm run start
+```
 
-## Service Worker
+El servidor de producción usa el output de Nitro (`.output/server/index.mjs`) y no depende de Lovable.
 
-`create-react-app`'s default service worker (in `src/index.js`) does not work with lambda functions out of the box. It prevents calling the function and returns the app itself instead ([Read more](https://github.com/facebook/create-react-app/issues/2237#issuecomment-302693219)). To solve this you have to eject and enhance the service worker configuration in the webpack config. Whitelist the path of your lambda function and you are good to go.
+## Arquitectura
+
+`React/TanStack Start → Services → Mock Data`.
+
+La siguiente fase puede sustituir Mock Data por API y MySQL sin rehacer las pantallas.
+
+## Alcance actual del planificador
+
+La demanda se introduce como **estimación manual** y queda etiquetada como tal. Aún no se calcula a partir de ventas reales, porque el proyecto no cuenta todavía con un libro de movimientos de bodega ni con un historial de ventas/compras conectado. Si no hay estimación, el sistema indica que faltan datos y no inventa una demanda. Las existencias actuales siguen siendo un valor editable de bodega; antes de usar el módulo en producción hay que implementar el registro auditable de movimientos, reservas, pedidos pendientes y recepción de compras, y trasladar la persistencia de `localStorage` a una API/base de datos.
+
+
+## Escaneo de equipos
+El lector de cámara utiliza `@zxing/browser` para admitir **Data Matrix y QR**. Los códigos Data Matrix pueden entregar directamente el número de serie, que el servicio de equipos utiliza para localizar la unidad.
+
+
+## Registro de ventas (V10)
+
+La sección **Administración → Ventas y carrito** permite seleccionar productos activos de Bodega, registrar cliente y forma de pago, aplicar descuento, confirmar una venta, descontar existencias y consultar/exportar el historial de ventas a CSV. Los registros y existencias de esta versión de demostración se guardan en `localStorage` del navegador; no constituyen persistencia compartida ni contabilidad de producción. Para producción, la confirmación de venta y la actualización del inventario deben migrarse a una transacción del backend/base de datos.
+
+
+## Preparación para producción
+
+Consulta [`docs/production/README.md`](docs/production/README.md) antes de desplegar. En un build de producción los datos de demostración están desactivados y `localStorage` no se utiliza como persistencia de negocio. La API y la base de datos todavía deben implementarse y conectarse; esta entrega no debe tratarse como lista para registrar operaciones reales.
