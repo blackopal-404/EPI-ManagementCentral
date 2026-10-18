@@ -61,8 +61,8 @@ export function AppShell({ children }: { children: ReactNode }) {
         <header className="sticky top-0 z-30 border-b border-border bg-card/95 backdrop-blur">
           <div className="mx-auto flex h-16 max-w-[1500px] items-center gap-3 px-4 sm:px-6">
             <div className="hidden shrink-0 lg:block"><Link to="/"><img src="/vertical-safety-logo.png" alt="Vertical Safety" className="h-11 w-[205px] object-contain object-left" /></Link></div>
-            <Sheet open={menuOpen} onOpenChange={setMenuOpen}><SheetTrigger className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-border lg:hidden" aria-label="Abrir menú"><Menu className="h-5 w-5" /></SheetTrigger><SheetContent side="left" className="relative z-[100] w-[85vw] max-w-xs overflow-hidden bg-gradient-to-b from-sidebar via-sidebar to-sidebar p-0 text-sidebar-foreground shadow-2xl">
-              <div className="relative h-full overflow-y-auto px-4 pb-6 pt-5">
+            <Sheet open={menuOpen} onOpenChange={setMenuOpen}><SheetTrigger className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-border lg:hidden" aria-label="Abrir menú"><Menu className="h-5 w-5" /></SheetTrigger><SheetContent side="left" className="z-[100] flex h-dvh max-h-dvh w-[85vw] max-w-xs flex-col overflow-hidden bg-gradient-to-b from-sidebar via-sidebar to-sidebar p-0 text-sidebar-foreground shadow-2xl">
+              <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-5">
                 <SheetHeader className="mb-5"><SheetTitle className="text-left text-white">EPIControl</SheetTitle></SheetHeader>
                 <img src="/vertical-safety-logo.png" alt="Vertical Safety" className="mb-5 w-full max-w-[210px] brightness-110" />
                 <NavLinks onNavigate={() => setMenuOpen(false)} isMagna={user?.role === "magna"} />
