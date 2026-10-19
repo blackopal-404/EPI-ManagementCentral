@@ -125,6 +125,109 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
       GROUP BY p.id ORDER BY p.name LIMIT 500`, [q]);
     return json(200, { data: result.rows });
   }
+  // Bodega: persistencia real de productos en PostgreSQL.
+  if (path === '/warehouse-products' && event.httpMethod === 'GET') {
+    if (!admin(user)) return json(403, { error: 'No tienes permiso para consultar la bodega.' });
+    const result = await db().query(`SELECT id, product_id AS "productId", sku, name, description,
+      image_url AS image, quantity, min_stock AS "minStock", cost_price AS "costPrice",
+      sale_price AS "salePrice", location, supplier, lead_time_days AS "leadTimeDays",
+      safety_stock AS "safetyStock", max_stock AS "maxStock",
+      min_purchase_quantity AS "minPurchaseQuantity", purchase_multiple AS "purchaseMultiple",
+      daily_demand_estimate AS "dailyDemandEstimate", demand_estimate_notes AS "demandEstimateNotes",
+      currency, active, updated_at::date::text AS "updatedAt"
+      FROM warehouse_products WHERE active = true ORDER BY name, sku`);
+    return json(200, { data: result.rows });
+  }
+  if (path === '/warehouse-products' && event.httpMethod === 'POST') {
+    if (!admin(user)) return json(403, { error: 'No tienes permiso para modificar la bodega.' });
+    const b = body(event);
+    const id = text(b.id, 100);
+    const sku = text(b.sku, 80);
+    const name = text(b.name, 180);
+    const quantity = Number(b.quantity ?? 0);
+    const minStock = Number(b.minStock ?? 0);
+    const costPrice = Number(b.costPrice ?? 0);
+    const salePrice = Number(b.salePrice ?? 0);
+    if (!id || !sku || !name || ![quantity, minStock, costPrice, salePrice].every((v) => Number.isFinite(v) && v >= 0)) {
+      return json(400, { error: 'Revisa el código, nombre, existencias y precios del producto.' });
+    }
+    const client = await db().connect();
+    let saved: Record<string, unknown> | undefined;
+    try {
+      await client.query('BEGIN');
+      const previous = await client.query<{ quantity: number }>(
+        'SELECT quantity FROM warehouse_products WHERE id = $1 FOR UPDATE', [id]);
+      const previousQuantity = Number(previous.rows[0]?.quantity ?? 0);
+      await client.query(`INSERT INTO warehouse_products
+        (id, product_id, sku, name, description, image_url, quantity, min_stock, cost_price, sale_price,
+         location, supplier, lead_time_days, safety_stock, max_stock, min_purchase_quantity,
+         purchase_multiple, daily_demand_estimate, demand_estimate_notes, currency, active, updated_at)
+        VALUES ($1, NULLIF($2,''), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, now())
+        ON CONFLICT (id) DO UPDATE SET product_id=EXCLUDED.product_id, sku=EXCLUDED.sku, name=EXCLUDED.name,
+         description=EXCLUDED.description, image_url=EXCLUDED.image_url, min_stock=EXCLUDED.min_stock,
+         cost_price=EXCLUDED.cost_price, sale_price=EXCLUDED.sale_price, location=EXCLUDED.location,
+         supplier=EXCLUDED.supplier, lead_time_days=EXCLUDED.lead_time_days, safety_stock=EXCLUDED.safety_stock,
+         max_stock=EXCLUDED.max_stock, min_purchase_quantity=EXCLUDED.min_purchase_quantity,
+         purchase_multiple=EXCLUDED.purchase_multiple, daily_demand_estimate=EXCLUDED.daily_demand_estimate,
+         demand_estimate_notes=EXCLUDED.demand_estimate_notes, currency=EXCLUDED.currency,
+         active=EXCLUDED.active, updated_at=now()
+        RETURNING id, product_id AS \"productId\", sku, name, description, image_url AS image, quantity,
+         min_stock AS \"minStock\", cost_price AS \"costPrice\", sale_price AS \"salePrice\", location, supplier,
+         lead_time_days AS \"leadTimeDays\", safety_stock AS \"safetyStock\", max_stock AS \"maxStock\",
+         min_purchase_quantity AS \"minPurchaseQuantity\", purchase_multiple AS \"purchaseMultiple\",
+         daily_demand_estimate AS \"dailyDemandEstimate\", demand_estimate_notes AS \"demandEstimateNotes\",
+         currency, active, updated_at::date::text AS \"updatedAt\"`, [
+          id, text(b.productId,100), sku, name, text(b.description,2000), text(b.image,2_000_000), quantity,
+          minStock, costPrice, salePrice, text(b.location,200), text(b.supplier,200),
+          Math.max(0, Number(b.leadTimeDays ?? 30)), Math.max(0, Number(b.safetyStock ?? 0)),
+          b.maxStock === null || b.maxStock === undefined || b.maxStock === '' ? null : Math.max(0, Number(b.maxStock)),
+          Math.max(0, Number(b.minPurchaseQuantity ?? 1)), Math.max(1, Number(b.purchaseMultiple ?? 1)),
+          b.dailyDemandEstimate === null || b.dailyDemandEstimate === undefined || b.dailyDemandEstimate === '' ? null : Math.max(0, Number(b.dailyDemandEstimate)),
+          text(b.demandEstimateNotes,2000), text(b.currency,3) || 'HNL', b.active !== false,
+        ]);
+      const delta = quantity - previousQuantity;
+      if (delta !== 0) {
+        await client.query(`INSERT INTO inventory_movements
+          (id, warehouse_product_id, movement_type, quantity_delta, unit_cost, reference_type, reference_id, reason, created_by)
+          VALUES (gen_random_uuid()::text, $1, $2, $3, $4, 'warehouse_admin', $1, $5, $6)`, [
+            id, previous.rows[0] ? 'adjustment' : 'initial_balance', delta, costPrice,
+            previous.rows[0] ? 'Ajuste de existencias desde administración de bodega' : 'Saldo inicial al crear producto de bodega', user.id,
+          ]);
+      }
+      // The stock balance and its audit movement are committed together.
+      if (delta !== 0) {
+        await client.query('UPDATE warehouse_products SET quantity = $2, updated_at = now() WHERE id = $1', [id, quantity]);
+      } else if (!previous.rows[0]) {
+        await client.query('UPDATE warehouse_products SET quantity = 0 WHERE id = $1', [id]);
+      }
+      const finalResult = await client.query(`SELECT id, product_id AS \"productId\", sku, name, description,
+        image_url AS image, quantity, min_stock AS \"minStock\", cost_price AS \"costPrice\",
+        sale_price AS \"salePrice\", location, supplier, lead_time_days AS \"leadTimeDays\",
+        safety_stock AS \"safetyStock\", max_stock AS \"maxStock\",
+        min_purchase_quantity AS \"minPurchaseQuantity\", purchase_multiple AS \"purchaseMultiple\",
+        daily_demand_estimate AS \"dailyDemandEstimate\", demand_estimate_notes AS \"demandEstimateNotes\",
+        currency, active, updated_at::date::text AS \"updatedAt\" FROM warehouse_products WHERE id = $1`, [id]);
+      saved = finalResult.rows[0];
+      await client.query('COMMIT');
+    } catch (error) {
+      await client.query('ROLLBACK');
+      throw error;
+    } finally {
+      client.release();
+    }
+    await audit(user.id, 'upsert', 'warehouse_product', id, { sku, name, quantity }, event);
+    return json(200, { data: saved });
+  }
+  const warehouseProductMatch = path.match(/^\/warehouse-products\/([^/]+)$/);
+  if (warehouseProductMatch && event.httpMethod === 'DELETE') {
+    if (!admin(user)) return json(403, { error: 'No tienes permiso para eliminar productos de bodega.' });
+    const id = decodeURIComponent(warehouseProductMatch[1]);
+    const result = await db().query('UPDATE warehouse_products SET active = false, updated_at = now() WHERE id = $1 AND active = true RETURNING id', [id]);
+    if (!result.rows[0]) return json(404, { error: 'Producto de bodega no encontrado.' });
+    await audit(user.id, 'deactivate', 'warehouse_product', id, { active: false }, event);
+    return json(200, { ok: true });
+  }
+
   if (path === '/equipment' && event.httpMethod === 'GET') {
     const q = text(event.queryStringParameters?.q, 100);
     const result = await db().query(`SELECT id, internal_code, serial_number, product_id, status, manufacturing_date, purchase_date, commissioning_date, location, assigned_user_id, last_inspection_date, next_inspection_date, service_life, notes, qr_code, data_matrix_code, created_at, updated_at

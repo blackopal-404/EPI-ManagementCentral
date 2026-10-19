@@ -477,18 +477,46 @@ function writeLocal<T>(key: string, value: T) {
   if (typeof window !== "undefined") window.localStorage.setItem(key, JSON.stringify(value));
 }
 
+async function warehouseApi<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const response = await fetch(`/.netlify/functions/api${path}`, {
+    ...init,
+    credentials: "same-origin",
+    headers: { "content-type": "application/json", ...(init.headers ?? {}) },
+  });
+  const payload = await response.json().catch(() => ({})) as { data?: T; error?: string };
+  if (!response.ok) throw new Error(payload.error || `Error del servidor (${response.status}).`);
+  return (payload.data ?? payload) as T;
+}
+
 export const warehouseService = {
-  async getProducts(): Promise<WarehouseProduct[]> { return delay(clone(readLocal(WAREHOUSE_KEY, mockWarehouseProducts))); },
-  async saveProducts(items: WarehouseProduct[]) { writeLocal(WAREHOUSE_KEY, items); return delay(clone(items)); },
-  async upsertProduct(item: WarehouseProduct) {
-    const items = readLocal(WAREHOUSE_KEY, mockWarehouseProducts);
-    const index = items.findIndex((x) => x.id === item.id);
-    if (index >= 0) items[index] = item; else items.unshift(item);
-    writeLocal(WAREHOUSE_KEY, items); return delay(clone(item));
+  async getProducts(): Promise<WarehouseProduct[]> {
+    if (import.meta.env.DEV) return delay(clone(readLocal(WAREHOUSE_KEY, mockWarehouseProducts)));
+    return warehouseApi<WarehouseProduct[]>("/warehouse-products");
   },
-  async deleteProduct(id: string) {
-    const items = readLocal(WAREHOUSE_KEY, mockWarehouseProducts).filter((x) => x.id !== id);
-    writeLocal(WAREHOUSE_KEY, items); return delay(true);
+  async saveProducts(items: WarehouseProduct[]) {
+    if (import.meta.env.DEV) { writeLocal(WAREHOUSE_KEY, items); return delay(clone(items)); }
+    const saved: WarehouseProduct[] = [];
+    for (const item of items) saved.push(await this.upsertProduct(item));
+    return saved;
+  },
+  async upsertProduct(item: WarehouseProduct): Promise<WarehouseProduct> {
+    if (import.meta.env.DEV) {
+      const items = readLocal(WAREHOUSE_KEY, mockWarehouseProducts);
+      const index = items.findIndex((x) => x.id === item.id);
+      if (index >= 0) items[index] = item; else items.unshift(item);
+      writeLocal(WAREHOUSE_KEY, items);
+      return delay(clone(item));
+    }
+    return warehouseApi<WarehouseProduct>("/warehouse-products", { method: "POST", body: JSON.stringify(item) });
+  },
+  async deleteProduct(id: string): Promise<boolean> {
+    if (import.meta.env.DEV) {
+      const items = readLocal(WAREHOUSE_KEY, mockWarehouseProducts).filter((x) => x.id !== id);
+      writeLocal(WAREHOUSE_KEY, items);
+      return delay(true);
+    }
+    await warehouseApi<{ ok: true }>(`/warehouse-products/${encodeURIComponent(id)}`, { method: "DELETE" });
+    return true;
   },
 };
 
