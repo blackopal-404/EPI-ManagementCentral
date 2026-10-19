@@ -1,8 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, ArrowRight, ScanLine } from "lucide-react";
-import { codeService, equipmentService } from "@/services";
-import { getProductById } from "@/data/mock/products";
+import { codeService, equipmentService, productService } from "@/services";
 import { EquipmentStatusBadge } from "@/components/common/StatusBadge";
 import { CameraQrScanner } from "@/components/qr/CameraQrScanner";
 
@@ -13,6 +13,7 @@ function ScanPage() {
   const [result, setResult] = useState<any>();
   const [scanning, setScanning] = useState(false);
   const [format, setFormat] = useState<string | null>(null);
+  const { data: products = [] } = useQuery({ queryKey: ["products"], queryFn: () => productService.getProducts() });
 
   async function lookup(value: string, detectedFormat?: string) {
     setRaw(value);
@@ -54,14 +55,14 @@ function ScanPage() {
           <div className="h-px flex-1 bg-border" />
         </div>
 
-        <button
+        {import.meta.env.DEV && <button
           onClick={demo}
           disabled={scanning}
           className="flex w-full items-center justify-center gap-2 rounded-md border border-border px-4 py-3 text-sm font-bold hover:bg-muted disabled:opacity-50"
         >
           <ScanLine className="h-4 w-4" />
           {scanning ? "Identificando…" : "Simular identificación"}
-        </button>
+        </button>}
 
         <div className="my-5 flex items-center gap-3">
           <div className="h-px flex-1 bg-border" />
@@ -120,7 +121,7 @@ function ScanPage() {
                 {result.internalCode} · {result.serialNumber}
               </p>
               <h2 className="mt-1 font-display text-xl font-bold">
-                {getProductById(result.productId)?.name}
+                {products.find(product => product.id === result.productId)?.name ?? "Producto"}
               </h2>
             </div>
             <EquipmentStatusBadge status={result.status} />

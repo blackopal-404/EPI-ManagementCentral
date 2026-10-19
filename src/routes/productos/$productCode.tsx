@@ -2,9 +2,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowLeft, FileText, ShieldCheck } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { productService, equipmentService, documentService } from "@/services";
+import { productService, equipmentService, documentService, categoryService } from "@/services";
 import { EquipmentStatusBadge } from "@/components/common/StatusBadge";
-import { getCategoryName, getManufacturerName } from "@/data/mock/categories";
 
 export const Route = createFileRoute("/productos/$productCode")({ component: ProductDetailPage });
 
@@ -19,6 +18,8 @@ function ProductDetailPage() {
     const p = await productService.getProductByCode(productCode);
     return p ? documentService.getDocumentsByProduct(p.id) : [];
   }});
+  const categories = useQuery({ queryKey: ["categories"], queryFn: categoryService.getCategories });
+  const manufacturers = useQuery({ queryKey: ["manufacturers"], queryFn: categoryService.getManufacturers });
   const p = product.data;
   if (!p) return <div className="panel p-8 text-center"><h1 className="font-bold">Producto no encontrado</h1><Link to="/productos" className="mt-3 inline-block text-primary">Volver al catálogo</Link></div>;
   const primary = p.images.find((i) => i.isPrimary) ?? p.images[0];
@@ -33,7 +34,7 @@ function ProductDetailPage() {
         <p className="mt-3 text-sm leading-6 text-muted-foreground">{p.description}</p>
         <div className="mt-4 flex flex-wrap gap-2">{p.standards.map((s) => <span key={s} className="rounded-full border border-border bg-muted px-2.5 py-1 text-xs font-semibold">{s}</span>)}</div>
         <div className="mt-5 grid grid-cols-2 gap-3 sm:grid-cols-4">
-          <Info label="Categoría" value={getCategoryName(p.categoryId)} /><Info label="Fabricante" value={getManufacturerName(p.manufacturerId)} /><Info label="Uso" value={p.usage} /><Info label="Vida útil" value={p.serviceLife} />
+          <Info label="Categoría" value={categories.data?.find(c => c.id === p.categoryId)?.name ?? "Sin categoría"} /><Info label="Fabricante" value={manufacturers.data?.find(m => m.id === p.manufacturerId)?.name ?? "Sin fabricante"} /><Info label="Uso" value={p.usage} /><Info label="Vida útil" value={p.serviceLife} />
         </div>
       </div>
     </div>

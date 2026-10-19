@@ -2,11 +2,10 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
 import { Edit3, PackagePlus, ScanLine, Trash2, X } from "lucide-react";
-import { equipmentService } from "@/services";
+import { equipmentService, productService } from "@/services";
 import { SectionCard } from "@/components/common/SectionCard";
 import { EquipmentTable } from "@/components/equipment/EquipmentTable";
-import { mockProducts } from "@/data/mock/products";
-import type { Equipment, EquipmentStatus } from "@/types";
+import type { Equipment, EquipmentStatus, Product } from "@/types";
 import { CameraQrScanner } from "@/components/qr/CameraQrScanner";
 import { BarcodeFormat } from "@zxing/browser";
 
@@ -18,16 +17,16 @@ const statuses: EquipmentStatus[] = [
 ];
 
 const blankEquipment = (): Equipment => ({
-  id: `eqp-${Date.now()}`,
+  id: globalThis.crypto?.randomUUID?.() ?? `eqp-${Date.now()}-${Math.random().toString(36).slice(2,8)}`,
   internalCode: `EPI-${String(Date.now()).slice(-4)}`,
   serialNumber: "",
-  productId: mockProducts[0]?.id ?? "",
+  productId: "",
   status: "disponible",
   manufacturingDate: "",
   purchaseDate: new Date().toISOString().slice(0, 10),
   commissioningDate: "",
   location: "Bodega principal",
-  serviceLife: mockProducts[0]?.serviceLife ?? "",
+  serviceLife: "",
   notes: "",
   qrCode: "",
   dataMatrixCode: "",
@@ -38,6 +37,7 @@ const blankEquipment = (): Equipment => ({
 function AdminEquipment() {
   const qc = useQueryClient();
   const { data = [] } = useQuery({ queryKey: ["admin-equipment"], queryFn: () => equipmentService.getEquipment() });
+  const { data: catalogProducts = [] } = useQuery({ queryKey: ["products", "catalog"], queryFn: () => productService.getProducts() });
   const [editing, setEditing] = useState<Equipment | null>(null);
 
   async function save(item: Equipment) {
@@ -61,6 +61,8 @@ function AdminEquipment() {
     setEditing(null);
     await qc.invalidateQueries({ queryKey: ["admin-equipment"] });
     await qc.invalidateQueries({ queryKey: ["equipment"] });
+    await qc.invalidateQueries({ queryKey: ["dashboard"] });
+    await qc.invalidateQueries({ queryKey: ["inventory"] });
   }
 
   async function remove(id: string) {
@@ -80,24 +82,24 @@ function AdminEquipment() {
             Registra cada unidad física y, cuando exista, guarda su código Data Matrix para localizarla rápidamente al escanearla.
           </p>
         </div>
-        <button onClick={() => setEditing(blankEquipment())} className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground">
+        <button onClick={() => setEditing({ ...blankEquipment(), productId: catalogProducts[0]?.id ?? "", serviceLife: catalogProducts[0]?.serviceLife ?? "" })} className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground">
           <PackagePlus className="h-4 w-4" /> Agregar equipo
         </button>
       </header>
 
-      <SectionCard title={`${data.length} unidades`} description="Los cambios se guardan localmente durante esta etapa de la aplicación.">
+      <SectionCard title={`${data.length} unidades`} description={import.meta.env.DEV ? "Los datos de demostración se guardan localmente." : "Los equipos se guardan en PostgreSQL y se relacionan con el catálogo de productos."}>
         <EquipmentTable equipment={data} onEdit={setEditing} onDelete={remove} />
       </SectionCard>
 
-      {editing && <EquipmentForm value={editing} onCancel={() => setEditing(null)} onSave={save} />}
+      {editing && <EquipmentForm value={editing} catalogProducts={catalogProducts} onCancel={() => setEditing(null)} onSave={save} />}
     </div>
   );
 }
 
-function EquipmentForm({ value, onCancel, onSave }: { value: Equipment; onCancel: () => void; onSave: (value: Equipment) => void }) {
+function EquipmentForm({ value, catalogProducts, onCancel, onSave }: { value: Equipment; catalogProducts: Product[]; onCancel: () => void; onSave: (value: Equipment) => void }) {
   const [v, setV] = useState(value);
   const set = <K extends keyof Equipment>(key: K, value: Equipment[K]) => setV((current) => ({ ...current, [key]: value }));
-  const selectedProduct = mockProducts.find((p) => p.id === v.productId);
+  const selectedProduct = catalogProducts.find((p) => p.id === v.productId);
   const isNew = !value.serialNumber;
   const [showScanner, setShowScanner] = useState(false);
 
@@ -115,8 +117,8 @@ function EquipmentForm({ value, onCancel, onSave }: { value: Equipment; onCancel
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
           <label className="space-y-1 text-sm font-semibold sm:col-span-2">
             <span>Producto del catálogo</span>
-            <select value={v.productId} onChange={(e) => { const p = mockProducts.find((x) => x.id === e.target.value); setV((current) => ({ ...current, productId: e.target.value, serviceLife: p?.serviceLife ?? current.serviceLife })); }} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm font-normal" required>
-              {mockProducts.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}
+            <select value={v.productId} onChange={(e) => { const p = catalogProducts.find((x) => x.id === e.target.value); setV((current) => ({ ...current, productId: e.target.value, serviceLife: p?.serviceLife ?? current.serviceLife })); }} className="h-10 w-full rounded-md border border-input bg-background px-3 text-sm font-normal" required>
+              {catalogProducts.map((p) => <option key={p.id} value={p.id}>{p.code} · {p.name}</option>)}
             </select>
           </label>
 

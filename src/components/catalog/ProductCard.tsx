@@ -1,10 +1,15 @@
 import { Link } from "@tanstack/react-router";
 import { ArrowRight } from "lucide-react";
 import type { Product } from "@/types";
-import { getCategoryName, getManufacturerName } from "@/data/mock/categories";
+import { useQuery } from "@tanstack/react-query";
+import { categoryService } from "@/services";
 import { StatusPill, productStatusMeta } from "@/components/common/StatusBadge";
 
 export function ProductCard({ product }: { product: Product }) {
+  const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: categoryService.getCategories });
+  const { data: manufacturers = [] } = useQuery({ queryKey: ["manufacturers"], queryFn: categoryService.getManufacturers });
+  const categoryName = categories.find(item => item.id === product.categoryId)?.name ?? "Sin categoría";
+  const manufacturerName = manufacturers.find(item => item.id === product.manufacturerId)?.name ?? "Sin fabricante";
   const primary = product.images.find((i) => i.isPrimary) ?? product.images[0];
   const meta = productStatusMeta[product.status];
 
@@ -44,11 +49,11 @@ export function ProductCard({ product }: { product: Product }) {
         <dl className="grid grid-cols-2 gap-2 text-xs">
           <div className="min-w-0">
             <dt className="label-caps">Categoría</dt>
-            <dd className="truncate font-medium">{getCategoryName(product.categoryId)}</dd>
+            <dd className="truncate font-medium">{categoryName}</dd>
           </div>
           <div className="min-w-0">
             <dt className="label-caps">Fabricante</dt>
-            <dd className="truncate font-medium">{getManufacturerName(product.manufacturerId)}</dd>
+            <dd className="truncate font-medium">{manufacturerName}</dd>
           </div>
         </dl>
         <Link

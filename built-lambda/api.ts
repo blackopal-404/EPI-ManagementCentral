@@ -1,6 +1,6 @@
 import type { Handler, HandlerEvent, HandlerResponse } from '@netlify/functions';
 import { Pool } from 'pg';
-import { createHash, randomBytes } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 const COOKIE_NAME = 'epi_session';
 const SESSION_DAYS = 7;
@@ -91,6 +91,200 @@ async function googleLogin(event: HandlerEvent): Promise<HandlerResponse> {
   return json(200, { user: { id: user.id, email, name: text(claims.name, 200) || email.split('@')[0], picture: text(claims.picture, 1000), role: roleName } }, { 'set-cookie': cookie(rawToken, SESSION_DAYS * 86400) });
 }
 
+
+type ColumnInfo = { column_name: string; data_type: string; udt_name: string; is_nullable: string; column_default: string | null; is_identity: string };
+const columnCache = new Map<string, ColumnInfo[]>();
+const tableAllowlist = new Set(['products','categories','manufacturers','product_images','warehouse_products','equipment','equipment_history','inspections','users','roles','technical_documents','inventory_movements','sales','sale_lines','sale_payments','quotes','quote_lines','purchase_plans','purchase_plan_lines','app_settings']);
+const aliases: Record<string, string[]> = {
+  category_id: ['categoryId'], manufacturer_id: ['manufacturerId'], product_id: ['productId'], image_url: ['image','imageUrl'], features_json: ['features'], specifications_json: ['specifications'], standards_json: ['standards'], warnings_json: ['warnings'], materials_json: ['materials'],
+  sort_order: ['order','sortOrder'], full_name: ['fullName','name'], last_access_at: ['lastAccess'], created_at: ['createdAt'], updated_at: ['updatedAt'],
+  internal_code: ['internalCode'], serial_number: ['serialNumber'], manufacturing_date: ['manufacturingDate'], purchase_date: ['purchaseDate'],
+  commissioning_date: ['commissioningDate'], assigned_user_id: ['assignedUserId'], last_inspection_date: ['lastInspectionDate'], next_inspection_date: ['nextInspectionDate'],
+  service_life: ['serviceLife'], qr_code: ['qrCode'], data_matrix_code: ['dataMatrixCode'], equipment_id: ['equipmentId'], inspector_id: ['inspectorId'],
+  inspection_date: ['date','inspectionDate'], observations: ['observations'], recommendations: ['recommendations'],
+  file_url: ['fileUrl'], file_size: ['fileSize'], sale_number: ['saleNumber'], sold_at: ['soldAt'], customer_name: ['customerName'],
+  customer_contact: ['customerContact'], payment_method: ['paymentMethod'], created_by: ['createdBy'], sale_id: ['saleId'], warehouse_product_id: ['warehouseProductId'],
+  unit_price: ['unitPrice'], unit_cost: ['unitCost'], line_total: ['lineTotal'], subtotal: ['subtotal'], discount: ['discount'], total: ['total'],
+  quote_number: ['quoteNumber'], company_name: ['companyName'], contact_name: ['contactName'], quote_date: ['date','quoteDate'], place: ['place'], purchase_plan_id: ['purchasePlanId'], suggested_quantity: ['suggestedQuantity'], line_cost: ['lineCost'],
+  lead_time_days: ['leadTimeDays'], min_stock: ['minStock'], cost_price: ['costPrice'], sale_price: ['salePrice'], safety_stock: ['safetyStock'], max_stock: ['maxStock'],
+  min_purchase_quantity: ['minPurchaseQuantity'], purchase_multiple: ['purchaseMultiple'], daily_demand_estimate: ['dailyDemandEstimate'], demand_estimate_notes: ['demandEstimateNotes'],
+  actor_user_id: ['actorUserId'], responsible_id: ['responsibleId'], assigned_by: ['assignedBy'], returned_by: ['returnedBy'],
+};
+function camel(name: string): string { return name.replace(/_([a-z])/g, (_, c: string) => c.toUpperCase()); }
+function quoteIdent(value: string): string { return '"' + value.replace(/"/g, '""') + '"'; }
+async function tableColumns(table: string, executor: Pick<Pool, 'query'> | { query: Pool['query'] }): Promise<ColumnInfo[]> {
+  if (!tableAllowlist.has(table)) throw new Error('Tabla no permitida.');
+  const cached = columnCache.get(table);
+  if (cached) return cached;
+  const result = await executor.query<ColumnInfo>(`SELECT column_name, data_type, udt_name, is_nullable, column_default, is_identity FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 ORDER BY ordinal_position`, [table]);
+  if (!result.rows.length) throw new Error(`No existe la tabla ${table} en PostgreSQL.`);
+  columnCache.set(table, result.rows);
+  return result.rows;
+}
+function fallbackValue(column: ColumnInfo, record: Record<string, unknown>): unknown {
+  const n = column.column_name;
+  if (n === 'id') return randomUUID();
+  if (n === 'slug') return text(record.slug,180) || text(record.name,180).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'') || randomUUID();
+  if (n === 'code' || n === 'sku') return text(record.sku,80) || text(record.code,80) || randomUUID().slice(0,8).toUpperCase();
+  if (n === 'model') return text(record.name,180);
+  if (n === 'status') return 'activo';
+  if (n === 'active') return true;
+  if (n === 'sort_order' || n === 'quantity' || n === 'min_stock' || n === 'cost_price' || n === 'sale_price' || n === 'price' || n === 'cost' || n === 'stock' || n === 'minimum_stock') return 0;
+  if (n.endsWith('_at') || n.endsWith('_date')) return new Date();
+  if (column.data_type === 'boolean') return false;
+  if (['smallint','integer','bigint','numeric','real','double precision'].includes(column.data_type)) return 0;
+  if (column.data_type === 'json' || column.data_type === 'jsonb') return n.includes('spec') || n.includes('feature') || n.includes('standard') || n.includes('warning') || n.includes('material') ? [] : {};
+  return '';
+}
+function valueForColumn(column: ColumnInfo, input: Record<string, unknown>): { found: boolean; value: unknown } {
+  const names = [column.column_name, camel(column.column_name), ...(aliases[column.column_name] ?? [])];
+  for (const name of names) if (Object.prototype.hasOwnProperty.call(input, name) && input[name] !== undefined) {
+    let value = input[name];
+    if ((column.data_type === 'json' || column.data_type === 'jsonb') && value !== null && typeof value !== 'string') value = JSON.stringify(value);
+    return { found: true, value };
+  }
+  return { found: false, value: undefined };
+}
+async function enumValues(column: ColumnInfo, executor: { query: Pool['query'] }): Promise<string[]> {
+  if (column.data_type !== 'USER-DEFINED') return [];
+  try {
+    const result = await executor.query<{ enumlabel: string }>(`SELECT e.enumlabel FROM pg_type t JOIN pg_enum e ON e.enumtypid=t.oid WHERE t.typname=$1 ORDER BY e.enumsortorder`, [column.udt_name]);
+    return result.rows.map(row => row.enumlabel);
+  } catch { return []; }
+}
+function enumFallback(value: unknown, choices: string[]): unknown {
+  if (!choices.length || typeof value !== 'string' || choices.includes(value)) return value;
+  const lower = value.toLowerCase();
+  const variants: Record<string,string[]> = {
+    activo: ['activo','activa','active','available'], activa: ['activa','activo','active'], active: ['active','activo','activa'],
+    completada: ['completada','completado','completed'], completed: ['completed','completada','completado'],
+    disponible: ['disponible','available','activo','active'], sale: ['sale','venta','salida','outbound'],
+    initial_balance: ['initial_balance','saldo_inicial','entrada','adjustment'], adjustment: ['adjustment','ajuste','entrada','salida'],
+  };
+  for (const candidate of variants[lower] ?? [lower]) if (choices.includes(candidate)) return candidate;
+  return choices[0];
+}
+async function dynamicWrite(executor: { query: Pool['query'] }, table: string, input: Record<string, unknown>, upsert: boolean | string = false): Promise<Record<string, unknown>> {
+  const columns = await tableColumns(table, executor as Pick<Pool,'query'>);
+  const values: unknown[] = [];
+  const names: string[] = [];
+  const explicitlyProvided = new Set<string>();
+  for (const column of columns) {
+    if (column.is_identity === 'YES' || column.column_default?.startsWith('nextval(')) continue;
+    const picked = valueForColumn(column, input);
+    if (picked.found) {
+      const choices = await enumValues(column, executor);
+      names.push(column.column_name); explicitlyProvided.add(column.column_name); values.push(enumFallback(picked.value, choices));
+    } else if (column.is_nullable === 'NO' && !column.column_default) {
+      const fallback = fallbackValue(column, input);
+      const choices = await enumValues(column, executor);
+      names.push(column.column_name); values.push(enumFallback(fallback, choices));
+    }
+  }
+  if (!names.length) throw new Error(`No hay columnas compatibles para guardar en ${table}.`);
+  const conflictColumn = typeof upsert === 'string' ? upsert : 'id';
+  const conflictExists = columns.some(c => c.column_name === conflictColumn) && names.includes(conflictColumn);
+  if (upsert && conflictExists) {
+    const conflictIndex = names.indexOf(conflictColumn);
+    const existing = await executor.query<Record<string, unknown>>(`SELECT * FROM ${quoteIdent(table)} WHERE ${quoteIdent(conflictColumn)}=$1 LIMIT 1`, [values[conflictIndex]]);
+    if (existing.rows[0]) {
+      const updateNames = names.filter(n => explicitlyProvided.has(n) && n !== conflictColumn && n !== 'created_at');
+      if (!updateNames.length) return existing.rows[0];
+      const updateValues = updateNames.map(n => values[names.indexOf(n)]);
+      updateValues.push(values[conflictIndex]);
+      const setSql = updateNames.map((n,i)=>`${quoteIdent(n)}=$${i+1}`).join(',');
+      const updated = await executor.query<Record<string, unknown>>(`UPDATE ${quoteIdent(table)} SET ${setSql} WHERE ${quoteIdent(conflictColumn)}=$${updateValues.length} RETURNING *`, updateValues);
+      return updated.rows[0] ?? existing.rows[0];
+    }
+  }
+  const placeholders = values.map((_, index) => `$${index+1}`);
+  let sql = `INSERT INTO ${quoteIdent(table)} (${names.map(quoteIdent).join(',')}) VALUES (${placeholders.join(',')})`;
+  if (upsert && conflictExists) {
+    const updates = names.filter(n => explicitlyProvided.has(n) && n !== conflictColumn && n !== 'created_at').map(n => `${quoteIdent(n)}=EXCLUDED.${quoteIdent(n)}`);
+    if (updates.length) sql += ` ON CONFLICT (${quoteIdent(conflictColumn)}) DO UPDATE SET ${updates.join(',')}`;
+    else sql += ` ON CONFLICT (${quoteIdent(conflictColumn)}) DO NOTHING`;
+  }
+  sql += ' RETURNING *';
+  const result = await executor.query<Record<string, unknown>>(sql, values);
+  return result.rows[0] ?? {};
+}
+async function getByJsonField(table: string, field: string, value: string, executor: { query: Pool['query'] }): Promise<Record<string, unknown> | null> {
+  if (!tableAllowlist.has(table)) throw new Error('Tabla no permitida.');
+  const result = await executor.query<{ record: Record<string, unknown> }>(`SELECT to_jsonb(t) AS record FROM ${quoteIdent(table)} t WHERE lower(COALESCE(to_jsonb(t)->>$1,''))=lower($2) LIMIT 1`, [field, value]);
+  return result.rows[0]?.record ?? null;
+}
+async function ensureReference(executor: { query: Pool['query'] }, table: 'categories'|'manufacturers', name: string): Promise<string> {
+  const existing = await getByJsonField(table, 'name', name, executor);
+  if (existing && typeof existing['id'] === 'string') return existing['id'];
+  const id = randomUUID();
+  const record: Record<string, unknown> = { id, name, slug: name.toLowerCase().replace(/[^a-z0-9]+/g,'-'), description: 'Registro creado automáticamente para mantener el catálogo conectado.', status: 'activa', order: 999, sortOrder: 999, sort_order: 999, country: 'No especificado', website: '', active: true };
+  const saved = await dynamicWrite(executor, table, record);
+  return String(saved['id'] ?? id);
+}
+async function ensureCatalogProduct(client: { query: Pool['query'] }, b: Record<string, unknown>): Promise<string> {
+  const sku = text(b['sku'],80);
+  const name = text(b['name'],180);
+  const rawImage = text(b['image'] ?? b['image_url'],2_000_000);
+  // Large data URLs belong in the warehouse record; avoid truncation in catalog image columns.
+  const catalogImage = rawImage.startsWith('data:') ? '' : rawImage.slice(0,1800);
+  const catalogData = { ...b, image: catalogImage, imageUrl: catalogImage, image_url: catalogImage };
+  let productId = text(b['productId'],100);
+  if (productId) {
+    const result = await client.query<{ id: string }>(`SELECT id FROM products WHERE id::text=$1 LIMIT 1`, [productId]);
+    if (result.rows[0]) {
+      await dynamicWrite(client, 'products', { ...catalogData, id: productId, code: sku, sku, name, model: name, description: text(b['description'],2000), status: 'activo', updatedAt: new Date() }, true);
+      return productId;
+    }
+  }
+  if (sku) {
+    const found = await client.query<{ id: string }>(`SELECT id FROM products p WHERE to_jsonb(p)->>'sku'=$1 OR to_jsonb(p)->>'code'=$1 LIMIT 1`, [sku]);
+    if (found.rows[0]) productId = found.rows[0].id;
+  }
+  if (productId) {
+    await dynamicWrite(client, 'products', { ...catalogData, id: productId, code: sku, sku, name, model: name, description: text(b['description'],2000), status: 'activo', updatedAt: new Date() }, true);
+    return productId;
+  }
+  const categoryId = await ensureReference(client, 'categories', 'Bodega');
+  const manufacturerId = await ensureReference(client, 'manufacturers', 'Sin fabricante');
+  productId = randomUUID();
+  await dynamicWrite(client, 'products', {
+    ...catalogData, id: productId, code: sku, sku, name, model: name, categoryId, manufacturerId,
+    description: text(b['description'],2000), features: [], specifications: [], materials: [], weight: '', dimensions: '',
+    standards: [], certifications: [], serviceLife: '', usage: 'Distribución / Bodega', equipmentType: 'Equipo de protección',
+    warnings: [], status: 'activo', createdAt: new Date(), updatedAt: new Date(),
+  });
+  const image = catalogImage;
+  if (image && image.length <= 1800) {
+    try { await dynamicWrite(client, 'product_images', { id: randomUUID(), productId, url: image, alt: name, altText: name, isPrimary: true, sortOrder: 0, createdAt: new Date() }); }
+    catch (error) { console.warn('No se pudo guardar imagen del catálogo; se conserva en bodega.', error); }
+  }
+  return productId;
+}
+async function syncWarehouseCatalogLinks(): Promise<void> {
+  const client = await db().connect();
+  try {
+    await client.query('BEGIN');
+    const result = await client.query<Record<string, unknown>>(`SELECT w.* FROM warehouse_products w
+      WHERE w.active=true AND (w.product_id IS NULL OR NOT EXISTS (SELECT 1 FROM products p WHERE p.id::text=w.product_id::text))
+      ORDER BY w.name, w.sku`);
+    for (const row of result.rows) {
+      const productId = await ensureCatalogProduct(client, { ...row, productId: row['product_id'], image: row['image_url'], costPrice: row['cost_price'], salePrice: row['sale_price'], minStock: row['min_stock'] });
+      await client.query('UPDATE warehouse_products SET product_id=$2, updated_at=now() WHERE id::text=$1', [String(row['id']), productId]);
+    }
+    await client.query('COMMIT');
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally { client.release(); }
+}
+
+async function rowsAsJson(table: string, executor: { query: Pool['query'] }, where = '', params: unknown[] = [], order = ''): Promise<Record<string, unknown>[]> {
+  if (!tableAllowlist.has(table)) throw new Error('Tabla no permitida.');
+  const sql = `SELECT to_jsonb(t) AS record FROM ${quoteIdent(table)} t ${where} ${order}`;
+  const result = await executor.query<{ record: Record<string, unknown> }>(sql, params);
+  return result.rows.map(row => row.record);
+}
+
 async function handle(event: HandlerEvent): Promise<HandlerResponse> {
   if (event.httpMethod === 'OPTIONS') return json(204, {}, { allow: 'GET,POST,PUT,DELETE,OPTIONS' });
   const path = (event.path.split('/.netlify/functions/api')[1] || '/').replace(/\/+$/, '') || '/';
@@ -98,6 +292,31 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
     try { await db().query('SELECT 1'); return json(200, { ok: true, database: 'connected' }); }
     catch (error) { console.error('Health check database error', error); return json(503, { ok: false, database: 'unavailable' }); }
   }
+  // Catálogo público: estas lecturas alimentan el sitio y no requieren una sesión administrativa.
+  if (path === '/categories' && event.httpMethod === 'GET') {
+    const q = text(event.queryStringParameters?.q, 100);
+    const result = await db().query<{ record: Record<string, unknown> }>(`SELECT to_jsonb(c) AS record FROM categories c
+      WHERE ($1='' OR to_jsonb(c)::text ILIKE '%' || $1 || '%')
+        AND lower(COALESCE(to_jsonb(c)->>'status','activa')) IN ('activa','activo','active','true','1')
+      ORDER BY COALESCE(NULLIF(to_jsonb(c)->>'sort_order','')::int, NULLIF(to_jsonb(c)->>'order','')::int, 999), to_jsonb(c)->>'name' LIMIT 500`, [q]);
+    return json(200, { data: result.rows.map(row => row.record) });
+  }
+  if (path === '/manufacturers' && event.httpMethod === 'GET') {
+    const result = await db().query<{ record: Record<string, unknown> }>(`SELECT to_jsonb(m) AS record FROM manufacturers m ORDER BY to_jsonb(m)->>'name' LIMIT 500`);
+    return json(200, { data: result.rows.map(row => row.record) });
+  }
+  if (path === '/products' && event.httpMethod === 'GET') {
+    // Solo una sesión administrativa puede ejecutar la sincronización; la lectura pública nunca escribe.
+    try { const catalogSession = await getSession(event); if (catalogSession && admin(catalogSession)) await syncWarehouseCatalogLinks(); } catch (error) { console.warn('Catalog sync deferred', error); }
+    const q = text(event.queryStringParameters?.q, 100);
+    const result = await db().query<{ record: Record<string, unknown>; images: Record<string, unknown>[] }>(`SELECT to_jsonb(p) AS record,
+      COALESCE((SELECT jsonb_agg(to_jsonb(pi)) FROM product_images pi WHERE pi.product_id::text=p.id::text), '[]'::jsonb) AS images,
+      COALESCE((SELECT to_jsonb(w)->>'image_url' FROM warehouse_products w WHERE w.product_id::text=p.id::text ORDER BY w.updated_at DESC LIMIT 1), '') AS warehouse_image
+      FROM products p WHERE ($1='' OR to_jsonb(p)::text ILIKE '%' || $1 || '%')
+      ORDER BY to_jsonb(p)->>'name' LIMIT 1000`, [q]);
+    return json(200, { data: result.rows.map(row => ({ ...row.record, images: row.images ?? [] })) });
+  }
+
   if (path === '/auth/google' && event.httpMethod === 'POST') {
     try { return await googleLogin(event); } catch (error) { console.error('Google login failed', error); return json(500, { error: 'No se pudo completar el inicio de sesión.' }); }
   }
@@ -113,18 +332,34 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
   if (!user) return json(401, { error: 'Inicia sesión para continuar.' });
   if (!sameOrigin(event)) return json(403, { error: 'Origen no permitido.' });
 
-  if (path === '/categories' && event.httpMethod === 'GET') {
-    const result = await db().query('SELECT id, name, slug, description, image_url, status, sort_order FROM categories WHERE status = $1 ORDER BY sort_order, name', ['activa']);
-    return json(200, { data: result.rows });
+  if (path === '/products' && event.httpMethod === 'POST') {
+    if (!admin(user)) return json(403, { error: 'No tienes permiso para modificar el catálogo.' });
+    const b = body(event);
+    const name = text(b.name, 180); const sku = text(b.sku, 80) || text(b.code, 80);
+    if (!name || !sku) return json(400, { error: 'El nombre y el código/SKU son obligatorios.' });
+    const saved = await dynamicWrite(db(), 'products', { ...b, id: text(b.id,100) || randomUUID(), name, sku, code: sku, status: text(b.status,40) || 'activo', updatedAt: new Date() }, true);
+    await audit(user.id, 'upsert', 'product', String(saved['id'] ?? ''), { sku, name }, event);
+    return json(200, { data: saved });
   }
-  if (path === '/products' && event.httpMethod === 'GET') {
-    const q = text(event.queryStringParameters?.q, 100);
-    const result = await db().query(`SELECT p.*, COALESCE(jsonb_agg(jsonb_build_object('id', pi.id, 'url', pi.url, 'alt', pi.alt, 'isPrimary', pi.is_primary)) FILTER (WHERE pi.id IS NOT NULL), '[]'::jsonb) AS images
-      FROM products p LEFT JOIN product_images pi ON pi.product_id = p.id
-      WHERE ($1 = '' OR p.name ILIKE '%' || $1 || '%' OR p.code ILIKE '%' || $1 || '%' OR p.sku ILIKE '%' || $1 || '%')
-      GROUP BY p.id ORDER BY p.name LIMIT 500`, [q]);
-    return json(200, { data: result.rows });
+  const productMatch = path.match(/^\/products\/([^/]+)$/);
+  if (productMatch && event.httpMethod === 'PUT') {
+    if (!admin(user)) return json(403, { error: 'No tienes permiso para modificar el catálogo.' });
+    const id = decodeURIComponent(productMatch[1]); const b = body(event);
+    const saved = await dynamicWrite(db(), 'products', { ...b, id, updatedAt: new Date() }, true);
+    await audit(user.id, 'update', 'product', id, { code: saved['code'] ?? saved['sku'] }, event);
+    return json(200, { data: saved });
   }
+  if (productMatch && event.httpMethod === 'DELETE') {
+    if (!admin(user)) return json(403, { error: 'No tienes permiso para modificar el catálogo.' });
+    const id = decodeURIComponent(productMatch[1]);
+    const columns = await tableColumns('products', db());
+    if (columns.some(column => column.column_name === 'status')) {
+      await db().query(`UPDATE products SET status=$2 WHERE id::text=$1`, [id, 'descontinuado']);
+    } else return json(400, { error: 'El catálogo no admite desactivación en el esquema actual.' });
+    await audit(user.id, 'deactivate', 'product', id, { status: 'descontinuado' }, event);
+    return json(200, { ok: true });
+  }
+
   // Bodega: persistencia real de productos en PostgreSQL.
   if (path === '/warehouse-products' && event.httpMethod === 'GET') {
     if (!admin(user)) return json(403, { error: 'No tienes permiso para consultar la bodega.' });
@@ -141,7 +376,7 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
   if (path === '/warehouse-products' && event.httpMethod === 'POST') {
     if (!admin(user)) return json(403, { error: 'No tienes permiso para modificar la bodega.' });
     const b = body(event);
-    const id = text(b.id, 100);
+    let id = text(b.id, 100) || randomUUID();
     const sku = text(b.sku, 80);
     const name = text(b.name, 180);
     const quantity = Number(b.quantity ?? 0);
@@ -155,6 +390,9 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
     let saved: Record<string, unknown> | undefined;
     try {
       await client.query('BEGIN');
+      const sameSku = await client.query<{ id: string }>('SELECT id FROM warehouse_products WHERE sku = $1 LIMIT 1 FOR UPDATE', [sku]);
+      if (sameSku.rows[0]) id = sameSku.rows[0].id;
+      const catalogProductId = await ensureCatalogProduct(client, { ...b, sku, name });
       const previous = await client.query<{ quantity: number }>(
         'SELECT quantity FROM warehouse_products WHERE id = $1 FOR UPDATE', [id]);
       const previousQuantity = Number(previous.rows[0]?.quantity ?? 0);
@@ -177,7 +415,7 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
          min_purchase_quantity AS \"minPurchaseQuantity\", purchase_multiple AS \"purchaseMultiple\",
          daily_demand_estimate AS \"dailyDemandEstimate\", demand_estimate_notes AS \"demandEstimateNotes\",
          currency, active, updated_at::date::text AS \"updatedAt\"`, [
-          id, text(b.productId,100), sku, name, text(b.description,2000), text(b.image,2_000_000), quantity,
+          id, catalogProductId, sku, name, text(b.description,2000), text(b.image,2_000_000), quantity,
           minStock, costPrice, salePrice, text(b.location,200), text(b.supplier,200),
           Math.max(0, Number(b.leadTimeDays ?? 30)), Math.max(0, Number(b.safetyStock ?? 0)),
           b.maxStock === null || b.maxStock === undefined || b.maxStock === '' ? null : Math.max(0, Number(b.maxStock)),
@@ -228,6 +466,151 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
     return json(200, { ok: true });
   }
 
+  if (path === '/roles' && event.httpMethod === 'GET') {
+    const result = await rowsAsJson('roles', db(), '', [], "ORDER BY to_jsonb(t)->>'name'");
+    return json(200, { data: result });
+  }
+  if (path === '/users' && event.httpMethod === 'GET') {
+    const result = admin(user)
+      ? await db().query<{ record: Record<string, unknown> }>(`SELECT to_jsonb(u) || jsonb_build_object('role', r.name) AS record FROM users u LEFT JOIN roles r ON r.id=u.role_id ORDER BY u.full_name LIMIT 1000`)
+      : await db().query<{ record: Record<string, unknown> }>(`SELECT jsonb_build_object('id',u.id,'full_name',u.full_name,'role',r.name,'status',u.status,'created_at',u.created_at,'last_access_at',u.last_access_at) AS record FROM users u LEFT JOIN roles r ON r.id=u.role_id ORDER BY u.full_name LIMIT 1000`);
+    return json(200, { data: result.rows.map(row => row.record) });
+  }
+  if (path === '/inspections' && event.httpMethod === 'GET') {
+    const q = text(event.queryStringParameters?.equipmentId, 100);
+    const result = await db().query<{ record: Record<string, unknown> }>(`SELECT to_jsonb(i) AS record FROM inspections i
+      WHERE ($1='' OR to_jsonb(i)->>'equipment_id'=$1 OR to_jsonb(i)->>'equipmentId'=$1)
+      ORDER BY COALESCE(to_jsonb(i)->>'inspection_date', to_jsonb(i)->>'date', to_jsonb(i)->>'created_at') DESC LIMIT 2000`, [q]);
+    return json(200, { data: result.rows.map(row => row.record) });
+  }
+  if (path === '/inspections' && event.httpMethod === 'POST') {
+    const b = body(event);
+    const equipmentId = text(b.equipmentId,100);
+    if (!equipmentId) return json(400, { error: 'Debes seleccionar un equipo.' });
+    const saved = await dynamicWrite(db(), 'inspections', { ...b, id: text(b.id,100) || randomUUID(), equipmentId, inspectorId: text(b.inspectorId,100) || user.id, inspectionDate: text(b.date,10) || new Date().toISOString().slice(0,10), date: text(b.date,10) || new Date().toISOString().slice(0,10), createdAt: new Date() });
+    await dynamicWrite(db(), 'equipment_history', { id: randomUUID(), equipmentId, actorUserId: user.id, eventType: 'inspeccion', type: 'inspeccion', title: 'Inspección registrada', detail: text(b.observations,1000), createdAt: new Date(), date: text(b.date,10) || new Date().toISOString().slice(0,10) });
+    await audit(user.id, 'create', 'inspection', String(saved['id'] ?? ''), { equipmentId, result: b.result }, event);
+    return json(201, { data: saved });
+  }
+  if (path === '/documents' && event.httpMethod === 'GET') {
+    const productId = text(event.queryStringParameters?.productId,100);
+    const equipmentId = text(event.queryStringParameters?.equipmentId,100);
+    const result = await db().query<{ record: Record<string, unknown> }>(`SELECT to_jsonb(d) AS record FROM technical_documents d
+      WHERE ($1='' OR to_jsonb(d)->>'product_id'=$1 OR to_jsonb(d)->>'productId'=$1)
+        AND ($2='' OR to_jsonb(d)->>'equipment_id'=$2 OR to_jsonb(d)->>'equipmentId'=$2)
+      ORDER BY COALESCE(to_jsonb(d)->>'updated_at',to_jsonb(d)->>'created_at') DESC LIMIT 2000`, [productId,equipmentId]);
+    return json(200, { data: result.rows.map(row => row.record) });
+  }
+  if (path === '/equipment/history' && event.httpMethod === 'GET') {
+    const equipmentId = text(event.queryStringParameters?.equipmentId,100);
+    if (!equipmentId) return json(400, { error: 'Falta equipmentId.' });
+    const result = await db().query<{ record: Record<string, unknown> }>(`SELECT to_jsonb(h) AS record FROM equipment_history h WHERE to_jsonb(h)->>'equipment_id'=$1 OR to_jsonb(h)->>'equipmentId'=$1 ORDER BY COALESCE(to_jsonb(h)->>'event_date',to_jsonb(h)->>'created_at') DESC LIMIT 500`, [equipmentId]);
+    return json(200, { data: result.rows.map(row => row.record) });
+  }
+  if (path === '/settings/quote-company' && event.httpMethod === 'GET') {
+    const found = await getByJsonField('app_settings','key','quote_company',db());
+    const value = found?.['value'] ?? found?.['value_json'] ?? found?.['setting_value'] ?? found?.['json_value'];
+    if (value && typeof value === 'object') return json(200, { data: value });
+    if (typeof value === 'string') { try { return json(200, { data: JSON.parse(value) }); } catch { /* return default below */ } }
+    return json(200, { data: { name: 'Vertical Safety', address: '', phone: '', email: '', logoDataUrl: '/vertical-safety-logo.png' } });
+  }
+  if (path === '/settings/quote-company' && event.httpMethod === 'PUT') {
+    if (!admin(user)) return json(403, { error: 'No tienes permiso para modificar la configuración.' });
+    const b = body(event); const profile = b.profile && typeof b.profile === 'object' ? b.profile as Record<string,unknown> : b;
+    const saved = await dynamicWrite(db(), 'app_settings', { key: 'quote_company', value: profile, valueJson: profile, settingValue: profile, jsonValue: profile, updatedBy: user.id, updatedAt: new Date() }, 'key');
+    await audit(user.id, 'update', 'app_settings', 'quote_company', {}, event);
+    return json(200, { data: saved['value'] ?? saved['value_json'] ?? saved['setting_value'] ?? profile });
+  }
+  if (path === '/quotes' && event.httpMethod === 'POST') {
+    if (!admin(user)) return json(403, { error: 'No tienes permiso para guardar cotizaciones.' });
+    const b = body(event); const customer = b.customer && typeof b.customer === 'object' ? b.customer as Record<string,unknown> : {};
+    const rawItems = Array.isArray(b.items) ? b.items as Record<string,unknown>[] : [];
+    if (!rawItems.length) return json(400, { error: 'Agrega al menos un producto a la cotización.' });
+    const client = await db().connect();
+    try {
+      await client.query('BEGIN');
+      const quoteId = randomUUID(); const now = new Date(); const quoteNumber = `COT-${now.toISOString().slice(0,10).replace(/-/g,'')}-${now.getTime().toString().slice(-6)}`;
+      const lines: Record<string,unknown>[] = []; let subtotal = 0;
+      for (const item of rawItems) {
+        const productId = text(item.warehouseProductId,100); const quantity = Math.floor(Number(item.quantity));
+        if (!productId || !Number.isFinite(quantity) || quantity < 1) throw new Error('Cantidad inválida en la cotización.');
+        const found = await client.query<Record<string,unknown>>('SELECT * FROM warehouse_products WHERE id::text=$1 AND active=true',[productId]);
+        const product = found.rows[0]; if (!product) throw new Error('Uno de los productos de la cotización no está disponible.');
+        const unitPrice = Number(item.unitPrice ?? product['sale_price']); if (!Number.isFinite(unitPrice) || unitPrice < 0) throw new Error('Precio inválido en la cotización.');
+        const lineTotal = Number((quantity*unitPrice).toFixed(2)); subtotal += lineTotal;
+        lines.push({ id:randomUUID(), quoteId, warehouseProductId:productId, quantity, unitPrice, lineTotal, sku:product['sku'], name:product['name'] });
+      }
+      const quote = await dynamicWrite(client,'quotes',{ id:quoteId, quoteNumber, companyName:text(customer['companyName'],180), customerName:text(customer['companyName'],180), contactName:text(customer['contactName'],180), customerContact:text(customer['contactName'],180), place:text(customer['place'],180), date:text(customer['date'],10) || now.toISOString().slice(0,10), notes:text(customer['notes'],2000), subtotal, total:Number(subtotal.toFixed(2)), status:'draft', createdBy:user.id, createdAt:now });
+      for (const line of lines) await dynamicWrite(client,'quote_lines',line);
+      await client.query('COMMIT');
+      await audit(user.id,'create','quote',quoteId,{quoteNumber,total:subtotal},event);
+      return json(201,{data:{...quote,lines}});
+    } catch(error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+  }
+  if (path === '/sales' && event.httpMethod === 'GET') {
+    if (!admin(user)) return json(403, { error: 'No tienes permiso para consultar ventas.' });
+    const result = await db().query<{ record: Record<string, unknown>; lines: Record<string, unknown>[] }>(`SELECT to_jsonb(s) AS record,
+      COALESCE((SELECT jsonb_agg(to_jsonb(sl)) FROM sale_lines sl WHERE to_jsonb(sl)->>'sale_id'=s.id::text), '[]'::jsonb) AS lines
+      FROM sales s ORDER BY COALESCE(to_jsonb(s)->>'sold_at',to_jsonb(s)->>'created_at') DESC LIMIT 2000`);
+    return json(200, { data: result.rows.map(row => ({ ...row.record, lines: row.lines ?? [] })) });
+  }
+  if (path === '/sales' && event.httpMethod === 'POST') {
+    if (!admin(user)) return json(403, { error: 'No tienes permiso para registrar ventas.' });
+    const b = body(event); const rawLines = Array.isArray(b.lines) ? b.lines as Record<string,unknown>[] : [];
+    if (!rawLines.length) return json(400, { error: 'Agrega al menos un producto a la venta.' });
+    const client = await db().connect();
+    try {
+      await client.query('BEGIN');
+      const saleId = randomUUID(); const now = new Date();
+      const datePart = now.toISOString().slice(0,10).replace(/-/g,''); const saleNumber = `VS-${datePart}-${now.getTime().toString().slice(-6)}`;
+      const normalized = new Map<string,number>();
+      for (const line of rawLines) { const productId = text(line.warehouseProductId,100); const qty = Math.floor(Number(line.quantity)); if (!productId || !Number.isFinite(qty) || qty < 1) throw new Error('Cantidad de venta inválida.'); normalized.set(productId,(normalized.get(productId) ?? 0)+qty); }
+      const lines: Record<string,unknown>[] = []; let subtotal = 0;
+      for (const [warehouseProductId, quantity] of normalized) {
+        const result = await client.query<Record<string,unknown>>('SELECT * FROM warehouse_products WHERE id::text=$1 AND active=true FOR UPDATE',[warehouseProductId]);
+        const product = result.rows[0]; if (!product) throw new Error('Uno de los productos no está disponible.');
+        const stock = Number(product['quantity']); if (stock < quantity) throw new Error(`Existencias insuficientes para ${String(product['name'])}.`);
+        const unitPrice = Number(product['sale_price']); const unitCost = Number(product['cost_price']); const lineTotal = Number((unitPrice*quantity).toFixed(2)); subtotal += lineTotal;
+        lines.push({ id: randomUUID(), saleId, warehouseProductId, sku: product['sku'], name: product['name'], quantity, unitPrice, unitCost, lineTotal });
+        await client.query('UPDATE warehouse_products SET quantity=$2, updated_at=now() WHERE id::text=$1',[warehouseProductId,stock-quantity]);
+        await dynamicWrite(client,'inventory_movements',{ id: randomUUID(), warehouseProductId, movementType: 'sale', quantityDelta: -quantity, unitCost, referenceType: 'sale', referenceId: saleId, reason: `Venta ${saleNumber}`, createdBy: user.id, createdAt: now });
+      }
+      const discount = Number(b.discount ?? 0); if (!Number.isFinite(discount) || discount < 0 || discount > subtotal) throw new Error('Descuento inválido.');
+      const sale = await dynamicWrite(client,'sales',{ id: saleId, saleNumber, soldAt: now, customerName: text(b.customerName,180), customerContact: text(b.customerContact,180), paymentMethod: text(b.paymentMethod,40) || 'efectivo', notes: text(b.notes,2000), subtotal, discount, total: Number((subtotal-discount).toFixed(2)), status: 'completed', createdBy: user.id, createdAt: now });
+      for (const line of lines) await dynamicWrite(client,'sale_lines',line);
+      await client.query('COMMIT');
+      await audit(user.id,'create','sale',saleId,{saleNumber,total:Number((subtotal-discount).toFixed(2))},event);
+      return json(201,{data:{...sale,lines}});
+    } catch (error) { await client.query('ROLLBACK'); throw error; } finally { client.release(); }
+  }
+  const reportExportMatch = path.match(/^\/reports\/([^/]+)\/export$/);
+  if (reportExportMatch && event.httpMethod === 'GET') {
+    if (!admin(user)) return json(403, { error: 'No tienes permiso para exportar reportes.' });
+    const reportId = decodeURIComponent(reportExportMatch[1]);
+    const reportTables: Record<string,string> = { catalogo: 'products', equipos: 'equipment', inspecciones: 'inspections', bodega: 'warehouse_products', ventas: 'sales' };
+    const table = reportTables[reportId];
+    if (!table) return json(404, { error: 'Reporte no encontrado.' });
+    const rows = await rowsAsJson(table, db(), '', [], "ORDER BY COALESCE(to_jsonb(t)->>'updated_at',to_jsonb(t)->>'created_at',to_jsonb(t)->>'sold_at') DESC");
+    const safeRows = rows.map(row => Object.fromEntries(Object.entries(row).filter(([key]) => !['image','image_url','logo_data_url','token_hash'].includes(key))));
+    return json(200, { data: { reportId, rows: safeRows } });
+  }
+  if (path === '/reports' && event.httpMethod === 'GET') {
+    if (!admin(user)) return json(403, { error: 'No tienes permiso para consultar reportes.' });
+    const [products,equipment,inspections,warehouse,sales] = await Promise.all([
+      db().query('SELECT count(*)::int AS count FROM products'), db().query('SELECT count(*)::int AS count FROM equipment'),
+      db().query('SELECT count(*)::int AS count FROM inspections'), db().query('SELECT count(*)::int AS count FROM warehouse_products WHERE active=true'),
+      db().query('SELECT count(*)::int AS count FROM sales'),
+    ]);
+    const now = new Date().toISOString();
+    return json(200,{data:[
+      {id:'catalogo',name:'Catálogo de productos',description:'Productos registrados en PostgreSQL.',rows:products.rows[0]?.count ?? 0,updatedAt:now},
+      {id:'equipos',name:'Inventario de equipos',description:'Unidades de equipo registradas.',rows:equipment.rows[0]?.count ?? 0,updatedAt:now},
+      {id:'inspecciones',name:'Inspecciones',description:'Historial de inspecciones registradas.',rows:inspections.rows[0]?.count ?? 0,updatedAt:now},
+      {id:'bodega',name:'Existencias de bodega',description:'Productos activos de bodega.',rows:warehouse.rows[0]?.count ?? 0,updatedAt:now},
+      {id:'ventas',name:'Ventas',description:'Ventas registradas en PostgreSQL.',rows:sales.rows[0]?.count ?? 0,updatedAt:now},
+    ]});
+  }
+
   if (path === '/equipment' && event.httpMethod === 'GET') {
     const q = text(event.queryStringParameters?.q, 100);
     const result = await db().query(`SELECT id, internal_code, serial_number, product_id, status, manufacturing_date, purchase_date, commissioning_date, location, assigned_user_id, last_inspection_date, next_inspection_date, service_life, notes, qr_code, data_matrix_code, created_at, updated_at
@@ -276,7 +659,9 @@ export const handler: Handler = async (event) => {
     console.error('API request failed', error);
     const message = error instanceof Error ? error.message : '';
     if (message.includes('duplicate key')) return json(409, { error: 'Ya existe un registro con esos datos.' });
-    if (message.includes('foreign key')) return json(400, { error: 'La referencia indicada no existe.' });
+    if (message.toLowerCase().includes('foreign key')) return json(400, { error: 'La referencia indicada no existe. Revisa categoría, fabricante y producto relacionado.' });
+    if (message.includes('Existencias insuficientes') || message.includes('Cantidad de venta inválida') || message.includes('Descuento inválido') || message.includes('Cantidad inválida en la cotización') || message.includes('Precio inválido en la cotización') || message.includes('no está disponible')) return json(400, { error: message });
+    if (message.includes('duplicate key')) return json(409, { error: 'Ya existe un registro con esos datos.' });
     return json(500, { error: 'Error interno del servidor.' });
   }
 };

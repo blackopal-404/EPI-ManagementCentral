@@ -1,11 +1,11 @@
 /**
  * Capa de servicios del frontend.
  *
- * Hoy resuelven contra MOCK DATA en memoria, pero la firma es asíncrona y
- * agnóstica del origen: cuando exista el backend, basta sustituir el cuerpo de
- * cada método por una llamada HTTP a la API sin tocar los componentes.
+ * En desarrollo usa datos de demostración; en producción consulta la API de Netlify
+ * y PostgreSQL. Las conversiones de tipos se centralizan aquí para que el frontend
+ * reciba los modelos de dominio independientemente de cómo pg devuelva los datos.
  *
- *   Frontend -> Servicios -> API -> Backend -> SQL
+ *   Frontend -> Servicios -> API de Netlify -> PostgreSQL
  */
 import type {
   AlertItem,
@@ -39,6 +39,117 @@ const delay = <T,>(value: T, ms = 120): Promise<T> =>
 
 const clone = <T,>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 
+function asRecord(value: unknown): Record<string, unknown> { return value && typeof value === 'object' ? value as Record<string, unknown> : {}; }
+function pick(record: Record<string, unknown>, ...keys: string[]): unknown {
+  for (const key of keys) if (record[key] !== undefined && record[key] !== null) return record[key];
+  return undefined;
+}
+function stringValue(value: unknown, fallback = ''): string { return typeof value === 'string' ? value : value === null || value === undefined ? fallback : String(value); }
+function numberValue(value: unknown, fallback = 0): number { const parsed = typeof value === 'number' ? value : Number(value); return Number.isFinite(parsed) ? parsed : fallback; }
+function arrayValue<T>(value: unknown, fallback: T[] = []): T[] {
+  if (Array.isArray(value)) return value as T[];
+  if (typeof value === 'string') { try { const parsed: unknown = JSON.parse(value); return Array.isArray(parsed) ? parsed as T[] : fallback; } catch { return fallback; } }
+  return fallback;
+}
+function mapProduct(value: unknown): Product {
+  const r = asRecord(value);
+  const rawImages = arrayValue<Record<string, unknown>>(r['images']);
+  const imageUrl = stringValue(pick(r, 'image', 'image_url', 'imageUrl', 'warehouse_image', 'warehouseImage'));
+  const images = rawImages.map((image, index) => ({
+    id: stringValue(pick(image, 'id'), `${stringValue(r['id'])}-image-${index}`),
+    url: stringValue(pick(image, 'url', 'image_url', 'imageUrl')),
+    alt: stringValue(pick(image, 'alt', 'alt_text', 'altText'), stringValue(r['name'])),
+    isPrimary: Boolean(pick(image, 'isPrimary', 'is_primary')),
+  })).filter(image => image.url);
+  if (!images.length && imageUrl) images.push({ id: `${stringValue(r['id'])}-primary`, url: imageUrl, alt: stringValue(r['name']), isPrimary: true });
+  const statusText = stringValue(r['status'], 'activo').toLowerCase();
+  return {
+    id: stringValue(r['id']), name: stringValue(r['name']), code: stringValue(pick(r, 'code', 'sku')),
+    sku: stringValue(pick(r, 'sku', 'code')), categoryId: stringValue(pick(r, 'categoryId', 'category_id')),
+    manufacturerId: stringValue(pick(r, 'manufacturerId', 'manufacturer_id')), model: stringValue(r['model']),
+    description: stringValue(r['description']), features: arrayValue<string>(pick(r, 'features', 'features_json')),
+    specifications: arrayValue<import('@/types').SpecItem>(pick(r, 'specifications', 'specifications_json')),
+    materials: arrayValue<string>(pick(r, 'materials')), weight: stringValue(r['weight']), dimensions: stringValue(r['dimensions']),
+    standards: arrayValue<string>(pick(r, 'standards', 'standards_json')), certifications: arrayValue<string>(pick(r, 'certifications', 'certifications_json')),
+    serviceLife: stringValue(pick(r, 'serviceLife', 'service_life')), usage: stringValue(r['usage']),
+    equipmentType: stringValue(pick(r, 'equipmentType', 'equipment_type')), warnings: arrayValue<string>(pick(r, 'warnings', 'warnings_json')),
+    images, status: statusText === 'descontinuado' || statusText === 'discontinued' || statusText === 'inactivo' ? 'descontinuado' : statusText === 'borrador' ? 'borrador' : 'activo',
+    createdAt: stringValue(pick(r, 'createdAt', 'created_at')), updatedAt: stringValue(pick(r, 'updatedAt', 'updated_at')),
+  };
+}
+function mapCategory(value: unknown): Category {
+  const r = asRecord(value);
+  const status = stringValue(r['status'], 'activa').toLowerCase();
+  return { id: stringValue(r['id']), name: stringValue(r['name']), slug: stringValue(r['slug']), description: stringValue(r['description']), image: stringValue(pick(r, 'image', 'image_url', 'imageUrl', 'warehouse_image', 'warehouseImage')), status: ['inactiva','inactive','false','0'].includes(status) ? 'inactiva' : 'activa', order: numberValue(pick(r, 'order','sort_order','sortOrder')) };
+}
+function mapManufacturer(value: unknown): Manufacturer {
+  const r = asRecord(value);
+  const website = stringValue(r['website']);
+  return { id: stringValue(r['id']), name: stringValue(r['name']), country: stringValue(r['country']), ...(website ? { website } : {}) };
+}
+function mapEquipment(value: unknown): Equipment {
+  const r = asRecord(value);
+  return {
+    id: stringValue(r['id']), internalCode: stringValue(pick(r,'internalCode','internal_code')),
+    serialNumber: stringValue(pick(r,'serialNumber','serial_number')), productId: stringValue(pick(r,'productId','product_id')),
+    status: stringValue(r['status'], 'disponible') as Equipment['status'], manufacturingDate: stringValue(pick(r,'manufacturingDate','manufacturing_date')),
+    purchaseDate: stringValue(pick(r,'purchaseDate','purchase_date')), commissioningDate: stringValue(pick(r,'commissioningDate','commissioning_date')),
+    location: stringValue(r['location']), ...(pick(r,'assignedUserId','assigned_user_id') ? { assignedUserId: stringValue(pick(r,'assignedUserId','assigned_user_id')) } : {}),
+    ...(pick(r,'lastInspectionDate','last_inspection_date') ? { lastInspectionDate: stringValue(pick(r,'lastInspectionDate','last_inspection_date')) } : {}),
+    ...(pick(r,'nextInspectionDate','next_inspection_date') ? { nextInspectionDate: stringValue(pick(r,'nextInspectionDate','next_inspection_date')) } : {}),
+    serviceLife: stringValue(pick(r,'serviceLife','service_life')), ...(r['notes'] ? { notes: stringValue(r['notes']) } : {}),
+    qrCode: stringValue(pick(r,'qrCode','qr_code')), ...(pick(r,'dataMatrixCode','data_matrix_code') ? { dataMatrixCode: stringValue(pick(r,'dataMatrixCode','data_matrix_code')) } : {}),
+    createdAt: stringValue(pick(r,'createdAt','created_at')), updatedAt: stringValue(pick(r,'updatedAt','updated_at')),
+  };
+}
+function mapInspection(value: unknown): Inspection {
+  const r = asRecord(value);
+  return { id: stringValue(r['id']), equipmentId: stringValue(pick(r,'equipmentId','equipment_id')), inspectorId: stringValue(pick(r,'inspectorId','inspector_id')),
+    date: stringValue(pick(r,'date','inspectionDate','inspection_date','created_at')), result: stringValue(r['result'],'pendiente') as Inspection['result'],
+    observations: stringValue(r['observations']), ...(r['recommendations'] ? { recommendations: stringValue(r['recommendations']) } : {}),
+    nextInspectionDate: stringValue(pick(r,'nextInspectionDate','next_inspection_date')), photos: arrayValue<string>(r['photos']) };
+}
+function mapUser(value: unknown): User {
+  const r = asRecord(value);
+  return { id: stringValue(r['id']), fullName: stringValue(pick(r,'fullName','full_name')), email: stringValue(r['email']), role: stringValue(r['role'],'usuario') as User['role'],
+    status: stringValue(r['status'],'activo') as User['status'], lastAccess: stringValue(pick(r,'lastAccess','last_access_at')), ...(pick(r,'location') ? { location: stringValue(r['location']) } : {}), createdAt: stringValue(pick(r,'createdAt','created_at')) };
+}
+function mapDocument(value: unknown): TechnicalDocument {
+  const r = asRecord(value);
+  return { id: stringValue(r['id']), ...(pick(r,'productId','product_id') ? { productId: stringValue(pick(r,'productId','product_id')) } : {}),
+    ...(pick(r,'equipmentId','equipment_id') ? { equipmentId: stringValue(pick(r,'equipmentId','equipment_id')) } : {}),
+    type: stringValue(r['type'],'otro') as TechnicalDocument['type'], title: stringValue(r['title']), fileUrl: stringValue(pick(r,'fileUrl','file_url')),
+    fileSize: stringValue(pick(r,'fileSize','file_size')), version: stringValue(r['version']), updatedAt: stringValue(pick(r,'updatedAt','updated_at')) };
+}
+function mapWarehouseProduct(value: unknown): WarehouseProduct {
+  const r = asRecord(value);
+  const currencyText = stringValue(r['currency'], 'HNL');
+  const maxStock = pick(r,'maxStock','max_stock');
+  const minPurchase = pick(r,'minPurchaseQuantity','min_purchase_quantity');
+  const purchaseMultiple = pick(r,'purchaseMultiple','purchase_multiple');
+  const demand = pick(r,'dailyDemandEstimate','daily_demand_estimate');
+  const lead = pick(r,'leadTimeDays','lead_time_days');
+  const safety = pick(r,'safetyStock','safety_stock');
+  return {
+    id: stringValue(r['id']), productId: stringValue(pick(r,'productId','product_id')),
+    sku: stringValue(r['sku']), name: stringValue(r['name']), description: stringValue(r['description']),
+    image: stringValue(pick(r,'image','image_url')), quantity: numberValue(r['quantity']), minStock: numberValue(pick(r,'minStock','min_stock')),
+    costPrice: numberValue(pick(r,'costPrice','cost_price')), salePrice: numberValue(pick(r,'salePrice','sale_price')),
+    location: stringValue(r['location']), supplier: stringValue(r['supplier']),
+    ...(lead !== undefined && lead !== null ? { leadTimeDays: numberValue(lead) } : {}),
+    ...(safety !== undefined && safety !== null ? { safetyStock: numberValue(safety) } : {}),
+    ...(maxStock !== undefined && maxStock !== null ? { maxStock: numberValue(maxStock) } : {}),
+    ...(minPurchase !== undefined && minPurchase !== null ? { minPurchaseQuantity: numberValue(minPurchase) } : {}),
+    ...(purchaseMultiple !== undefined && purchaseMultiple !== null ? { purchaseMultiple: numberValue(purchaseMultiple) } : {}),
+    ...(demand !== undefined && demand !== null ? { dailyDemandEstimate: numberValue(demand) } : {}),
+    ...(pick(r,'demandEstimateNotes','demand_estimate_notes') !== undefined ? { demandEstimateNotes: stringValue(pick(r,'demandEstimateNotes','demand_estimate_notes')) } : {}),
+    currency: (['HNL','USD','EUR'].includes(currencyText) ? currencyText : 'HNL') as WarehouseProduct['currency'],
+    active: r['active'] === undefined ? true : r['active'] === true || r['active'] === 'true',
+    updatedAt: stringValue(pick(r,'updatedAt','updated_at')).slice(0,10) || new Date().toISOString().slice(0,10),
+  };
+}
+
+
 export interface ProductFilters {
   search?: string;
   categoryId?: string;
@@ -52,47 +163,29 @@ export interface ProductFilters {
 
 export const productService = {
   async getProducts(filters: ProductFilters = {}): Promise<Product[]> {
-    let list = clone(mockProducts);
+    const source = import.meta.env.DEV ? clone(mockProducts) : (await warehouseApi<unknown[]>('/products')).map(mapProduct);
+    let list = source;
     const q = filters.search?.trim().toLowerCase();
-    if (q) {
-      list = list.filter((p) =>
-        [p.name, p.code, p.model, p.sku, p.equipmentType].some((f) => f.toLowerCase().includes(q)),
-      );
-    }
+    if (q) list = list.filter((p) => [p.name,p.code,p.model,p.sku,p.equipmentType].some((f) => f.toLowerCase().includes(q)));
     if (filters.categoryId) list = list.filter((p) => p.categoryId === filters.categoryId);
     if (filters.manufacturerId) list = list.filter((p) => p.manufacturerId === filters.manufacturerId);
     if (filters.equipmentType) list = list.filter((p) => p.equipmentType === filters.equipmentType);
     if (filters.status) list = list.filter((p) => p.status === filters.status);
     if (filters.usage) list = list.filter((p) => p.usage === filters.usage);
-    if (filters.standard) list = list.filter((p) => p.standards.some((s) => s === filters.standard));
-
+    if (filters.standard) list = list.filter((p) => p.standards.includes(filters.standard!));
     switch (filters.sort) {
-      case "codigo":
-        list.sort((a, b) => a.code.localeCompare(b.code));
-        break;
-      case "categoria":
-        list.sort((a, b) => a.categoryId.localeCompare(b.categoryId));
-        break;
-      case "reciente":
-        list.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
-        break;
-      default:
-        list.sort((a, b) => a.name.localeCompare(b.name));
+      case 'codigo': list.sort((a,b) => a.code.localeCompare(b.code)); break;
+      case 'categoria': list.sort((a,b) => a.categoryId.localeCompare(b.categoryId)); break;
+      case 'reciente': list.sort((a,b) => b.updatedAt.localeCompare(a.updatedAt)); break;
+      default: list.sort((a,b) => a.name.localeCompare(b.name));
     }
-    return delay(list);
+    return list;
   },
-  async getProductById(id: string): Promise<Product | undefined> {
-    return delay(clone(mockProducts.find((p) => p.id === id)));
-  },
-  async getProductByCode(code: string): Promise<Product | undefined> {
-    return delay(clone(mockProducts.find((p) => p.code.toLowerCase() === code.toLowerCase())));
-  },
+  async getProductById(id: string): Promise<Product | undefined> { return (await this.getProducts()).find(p => p.id === id); },
+  async getProductByCode(code: string): Promise<Product | undefined> { return (await this.getProducts()).find(p => p.code.toLowerCase() === code.toLowerCase() || p.sku.toLowerCase() === code.toLowerCase()); },
   async getFilterOptions() {
-    return delay({
-      equipmentTypes: [...new Set(mockProducts.map((p) => p.equipmentType))].sort(),
-      usages: [...new Set(mockProducts.map((p) => p.usage))].sort(),
-      standards: [...new Set(mockProducts.flatMap((p) => p.standards))].sort(),
-    });
+    const products = await this.getProducts();
+    return { equipmentTypes: [...new Set(products.map(p => p.equipmentType).filter(Boolean))].sort(), usages: [...new Set(products.map(p => p.usage).filter(Boolean))].sort(), standards: [...new Set(products.flatMap(p => p.standards))].sort() };
   },
 };
 
@@ -108,7 +201,7 @@ const EQUIPMENT_KEY = "sgh:equipment";
 
 export const equipmentService = {
   async getEquipment(filters: EquipmentFilters = {}): Promise<Equipment[]> {
-    let list = clone(readLocal(EQUIPMENT_KEY, mockEquipment));
+    let list = import.meta.env.DEV ? clone(readLocal(EQUIPMENT_KEY, mockEquipment)) : (await warehouseApi<unknown[]>('/equipment')).map(mapEquipment);
     const q = filters.search?.trim().toLowerCase();
     if (q) {
       list = list.filter((e) =>
@@ -122,13 +215,13 @@ export const equipmentService = {
     return delay(list);
   },
   async getEquipmentById(id: string): Promise<Equipment | undefined> {
-    return delay(clone(readLocal(EQUIPMENT_KEY, mockEquipment).find((e) => e.id === id)));
+    return import.meta.env.DEV ? delay(clone(readLocal(EQUIPMENT_KEY, mockEquipment).find((e) => e.id === id))) : (await this.getEquipment()).find(e => e.id === id);
   },
   async getEquipmentByInternalCode(code: string): Promise<Equipment | undefined> {
-    return delay(clone(readLocal(EQUIPMENT_KEY, mockEquipment).find((e) => e.internalCode.toLowerCase() === code.toLowerCase())));
+    return (await this.getEquipment()).find(e => e.internalCode.toLowerCase() === code.toLowerCase());
   },
   async getEquipmentBySerialNumber(serial: string): Promise<Equipment | undefined> {
-    return delay(clone(readLocal(EQUIPMENT_KEY, mockEquipment).find((e) => e.serialNumber.toLowerCase() === serial.toLowerCase())));
+    return (await this.getEquipment()).find(e => e.serialNumber.toLowerCase() === serial.toLowerCase());
   },
   /**
    * Busca una unidad a partir de cualquier código leído por cámara.
@@ -137,7 +230,7 @@ export const equipmentService = {
   async getEquipmentByScanCode(code: string): Promise<Equipment | undefined> {
     const normalized = codeService.parse(code);
     if (!normalized) return delay(undefined);
-    const items = readLocal(EQUIPMENT_KEY, mockEquipment);
+    const items = await this.getEquipment();
     const normalizedLower = normalized.toLowerCase();
     return delay(clone(items.find((e) =>
       e.internalCode.toLowerCase() === normalizedLower ||
@@ -150,6 +243,7 @@ export const equipmentService = {
     return this.getEquipmentByScanCode(code);
   },
   async getHistory(equipmentId: string): Promise<EquipmentHistory[]> {
+    if (!import.meta.env.DEV) { const rows = await warehouseApi<unknown[]>(`/equipment/history?equipmentId=${encodeURIComponent(equipmentId)}`); return rows.map(value => { const r=asRecord(value); return { id:stringValue(r['id']), equipmentId:stringValue(pick(r,'equipmentId','equipment_id')), date:stringValue(pick(r,'date','event_date','created_at')), type:stringValue(pick(r,'type','event_type'),'estado') as EquipmentHistory['type'], title:stringValue(r['title']), detail:stringValue(r['detail']), actor:stringValue(pick(r,'actor','actor_email','actor_user_id')) }; }); }
     const list = clone(mockHistory.filter((h) => h.equipmentId === equipmentId));
     if (list.length) return delay(list.sort((a, b) => b.date.localeCompare(a.date)));
     const equipment = readLocal(EQUIPMENT_KEY, mockEquipment).find((e) => e.id === equipmentId);
@@ -179,20 +273,21 @@ export const equipmentService = {
     );
   },
   async getLocations(): Promise<string[]> {
-    const items = readLocal(EQUIPMENT_KEY, mockEquipment);
-    return delay([...new Set(items.map((e) => e.location))].sort());
+    const items = await this.getEquipment();
+    return [...new Set(items.map((e) => e.location))].sort();
   },
   async upsertEquipment(item: Equipment): Promise<Equipment> {
-    const items = readLocal(EQUIPMENT_KEY, mockEquipment);
-    const index = items.findIndex((x) => x.id === item.id);
-    if (index >= 0) items[index] = item; else items.unshift(item);
-    writeLocal(EQUIPMENT_KEY, items);
-    return delay(clone(item));
+    if (!import.meta.env.DEV) {
+      const exists = await this.getEquipmentById(item.id);
+      const saved = await warehouseApi<unknown>(exists ? `/equipment/${encodeURIComponent(item.id)}` : '/equipment', { method: exists ? 'PUT' : 'POST', body: JSON.stringify(item) });
+      return mapEquipment(saved);
+    }
+    const items = readLocal(EQUIPMENT_KEY, mockEquipment); const index = items.findIndex((x) => x.id === item.id);
+    if (index >= 0) items[index] = item; else items.unshift(item); writeLocal(EQUIPMENT_KEY, items); return delay(clone(item));
   },
   async deleteEquipment(id: string): Promise<boolean> {
-    const items = readLocal(EQUIPMENT_KEY, mockEquipment).filter((x) => x.id !== id);
-    writeLocal(EQUIPMENT_KEY, items);
-    return delay(true);
+    if (!import.meta.env.DEV) { await warehouseApi(`/equipment/${encodeURIComponent(id)}`, { method: 'DELETE' }); return true; }
+    const items = readLocal(EQUIPMENT_KEY, mockEquipment).filter((x) => x.id !== id); writeLocal(EQUIPMENT_KEY, items); return delay(true);
   },
 };
 
@@ -202,7 +297,7 @@ export const codeService = {
    * Un Data Matrix de Petzl puede entregar directamente el número de serie.
    */
   parse(raw: string): string | null {
-    const value = raw["trim"]();
+    const value = raw.trim();
     if (!value) return null;
     if (value.toUpperCase().startsWith("EQUIPMENT:")) return value.slice(10).trim();
     const match = value.match(/\/equipment\/([^/?#]+)/i);
@@ -226,158 +321,93 @@ export const codeService = {
 export const qrService = codeService;
 
 export const categoryService = {
-  async getCategories(): Promise<Category[]> {
-    return delay(clone(mockCategories).sort((a, b) => a.order - b.order));
-  },
-  async getCategoryBySlug(slug: string): Promise<Category | undefined> {
-    return delay(clone(mockCategories.find((c) => c.slug === slug)));
-  },
-  async getManufacturers(): Promise<Manufacturer[]> {
-    return delay(clone(mockManufacturers));
-  },
+  async getCategories(): Promise<Category[]> { return import.meta.env.DEV ? delay(clone(mockCategories).sort((a,b)=>a.order-b.order)) : (await warehouseApi<unknown[]>('/categories')).map(mapCategory); },
+  async getCategoryBySlug(slug: string): Promise<Category | undefined> { return (await this.getCategories()).find(c => c.slug === slug); },
+  async getManufacturers(): Promise<Manufacturer[]> { return import.meta.env.DEV ? delay(clone(mockManufacturers)) : (await warehouseApi<unknown[]>('/manufacturers')).map(mapManufacturer); },
 };
 
 export const inspectionService = {
-  async getInspections(): Promise<Inspection[]> {
-    return delay(clone(mockInspections).sort((a, b) => b.date.localeCompare(a.date)));
-  },
-  async getInspectionsByEquipment(equipmentId: string): Promise<Inspection[]> {
-    return delay(clone(mockInspections.filter((i) => i.equipmentId === equipmentId)));
-  },
-  /** MOCK: no persiste nada. El backend futuro validará y guardará el registro. */
+  async getInspections(): Promise<Inspection[]> { return import.meta.env.DEV ? delay(clone(mockInspections).sort((a,b)=>b.date.localeCompare(a.date))) : (await warehouseApi<unknown[]>('/inspections')).map(mapInspection); },
+  async getInspectionsByEquipment(equipmentId: string): Promise<Inspection[]> { return import.meta.env.DEV ? delay(clone(mockInspections.filter(i=>i.equipmentId===equipmentId))) : (await warehouseApi<unknown[]>(`/inspections?equipmentId=${encodeURIComponent(equipmentId)}`)).map(mapInspection); },
   async registerInspection(draft: InspectionDraft): Promise<{ ok: true; draft: InspectionDraft }> {
-    return delay({ ok: true as const, draft }, 400);
+    if (!import.meta.env.DEV) { const saved = await warehouseApi<unknown>('/inspections',{method:'POST',body:JSON.stringify(draft)}); return {ok:true,draft:{...draft,...(asRecord(saved) as unknown as Partial<InspectionDraft>)}}; }
+    return delay({ok:true as const,draft},400);
   },
 };
 
 export const inventoryService = {
   async getInventory(): Promise<InventorySummary[]> {
-    const summary = mockProducts.map((product) => {
-      const units = mockEquipment.filter((e) => e.productId === product.id);
-      return {
-        productId: product.id,
-        productCode: product.code,
-        productName: product.name,
-        categoryId: product.categoryId,
-        total: units.length,
-        available: units.filter((u) => u.status === "disponible" || u.status === "activo").length,
-        assigned: units.filter((u) => u.status === "asignado").length,
-        maintenance: units.filter((u) => u.status === "mantenimiento" || u.status === "en_inspeccion").length,
-        outOfService: units.filter(
-          (u) => u.status === "fuera_servicio" || u.status === "vencido" || u.status === "retirado",
-        ).length,
-      };
-    });
-    return delay(summary.filter((s) => s.total > 0));
+    const [products,equipment] = await Promise.all([productService.getProducts(),equipmentService.getEquipment()]);
+    return products.map(product => { const units=equipment.filter(e=>e.productId===product.id); return { productId:product.id, productCode:product.code, productName:product.name, categoryId:product.categoryId, total:units.length,
+      available:units.filter(u=>u.status==='disponible'||u.status==='activo').length, assigned:units.filter(u=>u.status==='asignado').length,
+      maintenance:units.filter(u=>u.status==='mantenimiento'||u.status==='en_inspeccion').length, outOfService:units.filter(u=>u.status==='fuera_servicio'||u.status==='vencido'||u.status==='retirado').length }; }).filter(item=>item.total>0);
   },
 };
 
 export const userService = {
-  async getUsers(): Promise<User[]> {
-    return delay(clone(mockUsers));
-  },
-  async getUserById(id: string): Promise<User | undefined> {
-    return delay(clone(mockUsers.find((u) => u.id === id)));
-  },
+  async getUsers(): Promise<User[]> { return import.meta.env.DEV ? delay(clone(mockUsers)) : (await warehouseApi<unknown[]>('/users')).map(mapUser); },
+  async getUserById(id: string): Promise<User | undefined> { return (await this.getUsers()).find(u=>u.id===id); },
   async getRoles(): Promise<Role[]> {
-    return delay(clone(mockRoles));
+    if (import.meta.env.DEV) return delay(clone(mockRoles));
+    return (await warehouseApi<unknown[]>('/roles')).map(value=>{ const r=asRecord(value); const name=stringValue(r['name'],'usuario') as Role['name']; return {id:stringValue(r['id']),name,label:stringValue(pick(r,'label','display_name'),name),description:stringValue(r['description'])}; });
   },
 };
 
 export const documentService = {
-  async getDocumentsByProduct(productId: string): Promise<TechnicalDocument[]> {
-    return delay(clone(mockDocuments.filter((d) => d.productId === productId)));
-  },
-  async getAllDocuments(): Promise<TechnicalDocument[]> {
-    return delay(clone(mockDocuments));
-  },
+  async getDocumentsByProduct(productId: string): Promise<TechnicalDocument[]> { return import.meta.env.DEV ? delay(clone(mockDocuments.filter(d=>d.productId===productId))) : (await warehouseApi<unknown[]>(`/documents?productId=${encodeURIComponent(productId)}`)).map(mapDocument); },
+  async getAllDocuments(): Promise<TechnicalDocument[]> { return import.meta.env.DEV ? delay(clone(mockDocuments)) : (await warehouseApi<unknown[]>('/documents')).map(mapDocument); },
 };
 
 export const reportService = {
   async getReports(): Promise<Report[]> {
-    return delay(clone(mockReports));
+    if (import.meta.env.DEV) return delay(clone(mockReports));
+    return (await warehouseApi<unknown[]>('/reports')).map(value => { const r=asRecord(value); return { id:stringValue(r['id']), name:stringValue(r['name']), description:stringValue(r['description']), rows:numberValue(r['rows']), updatedAt:stringValue(pick(r,'updatedAt','updated_at')) }; });
   },
-  /** MOCK: la exportación real se implementará contra el backend. */
   async export(reportId: string, format: "excel" | "pdf") {
-    return delay({ ok: true as const, reportId, format }, 400);
+    if (import.meta.env.DEV) return delay({ ok: true as const, reportId, format, demo: true }, 300);
+    const payload = await warehouseApi<{ reportId: string; rows: Record<string, unknown>[] }>(`/reports/${encodeURIComponent(reportId)}/export`);
+    const rows = payload.rows ?? [];
+    const columns = [...new Set(rows.flatMap(row => Object.keys(row)))].filter(key => !['image','image_url','token_hash'].includes(key));
+    const cell = (value: unknown) => {
+      if (value === null || value === undefined) return '';
+      if (typeof value === 'object') return JSON.stringify(value);
+      return String(value);
+    };
+    if (format === 'excel') {
+      const quoteCsv = (value: unknown) => `"${cell(value).replace(/"/g,'""')}"`;
+      const csv = '\uFEFF' + [columns.map(quoteCsv).join(','), ...rows.map(row => columns.map(column => quoteCsv(row[column])).join(','))].join('\r\n');
+      const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' }); const url = URL.createObjectURL(blob); const anchor = document.createElement('a');
+      anchor.href = url; anchor.download = `epi-${reportId}-${new Date().toISOString().slice(0,10)}.csv`; document.body.appendChild(anchor); anchor.click(); anchor.remove(); URL.revokeObjectURL(url);
+      return { ok: true as const, reportId, format };
+    }
+    const escapeHtml = (value: unknown) => cell(value).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+    const html = `<!doctype html><html lang="es"><head><meta charset="utf-8"><title>Reporte EPIControl</title><style>body{font:12px Arial,sans-serif;padding:24px;color:#111}h1{font-size:20px}p{color:#555}table{width:100%;border-collapse:collapse}th,td{border:1px solid #bbb;padding:6px;text-align:left;vertical-align:top;word-break:break-word}th{background:#eee}@media print{body{padding:0}tr{break-inside:avoid}}</style></head><body><h1>Reporte EPIControl: ${escapeHtml(reportId)}</h1><p>Generado: ${escapeHtml(new Date().toLocaleString('es-HN'))} · Registros: ${rows.length}</p><table><thead><tr>${columns.map(column=>`<th>${escapeHtml(column)}</th>`).join('')}</tr></thead><tbody>${rows.map(row=>`<tr>${columns.map(column=>`<td>${escapeHtml(row[column])}</td>`).join('')}</tr>`).join('')}</tbody></table><script>window.onload=()=>window.print()</script></body></html>`;
+    const printWindow = window.open('', '_blank');
+    if (!printWindow) throw new Error('El navegador bloqueó la ventana del reporte. Permite las ventanas emergentes y vuelve a intentarlo.');
+    printWindow.document.open(); printWindow.document.write(html); printWindow.document.close();
+    return { ok: true as const, reportId, format };
   },
 };
 
 export const dashboardService = {
   async getMetrics(): Promise<DashboardMetrics> {
-    const s = (status: string) => mockEquipment.filter((e) => e.status === status).length;
-    return delay({
-      total: mockEquipment.length,
-      active: s("activo") + s("asignado") + s("disponible"),
-      inInspection: s("en_inspeccion") + s("mantenimiento"),
-      expiringSoon: s("proximo_vencer"),
-      expired: s("vencido"),
-      outOfService: s("fuera_servicio") + s("retirado"),
-    });
+    const equipment = await equipmentService.getEquipment(); const s=(status:string)=>equipment.filter(e=>e.status===status).length;
+    return {total:equipment.length,active:s('activo')+s('asignado')+s('disponible'),inInspection:s('en_inspeccion')+s('mantenimiento'),expiringSoon:s('proximo_vencer'),expired:s('vencido'),outOfService:s('fuera_servicio')+s('retirado')};
   },
   async getByCategory() {
-    const data = mockCategories.map((c) => ({
-      name: c.name,
-      total: mockEquipment.filter((e) => {
-        const product = mockProducts.find((p) => p.id === e.productId);
-        return product?.categoryId === c.id;
-      }).length,
-    }));
-    return delay(data.filter((d) => d.total > 0));
+    const [categories,products,equipment] = await Promise.all([categoryService.getCategories(),productService.getProducts(),equipmentService.getEquipment()]);
+    return categories.map(category=>({name:category.name,total:equipment.filter(e=>products.find(p=>p.id===e.productId)?.categoryId===category.id).length})).filter(item=>item.total>0);
   },
   async getUpcomingInspections() {
-    const buckets = [
-      { name: "0-7 días", total: 0 },
-      { name: "8-15 días", total: 0 },
-      { name: "16-30 días", total: 0 },
-      { name: "31-90 días", total: 0 },
-    ];
-    const today = new Date("2026-09-09");
-    mockEquipment.forEach((e) => {
-      if (!e.nextInspectionDate) return;
-      const diff = Math.round(
-        (new Date(e.nextInspectionDate).getTime() - today.getTime()) / 86_400_000,
-      );
-      if (diff < 0) return;
-      if (diff <= 7) buckets[0]!.total += 1;
-      else if (diff <= 15) buckets[1]!.total += 1;
-      else if (diff <= 30) buckets[2]!.total += 1;
-      else if (diff <= 90) buckets[3]!.total += 1;
-    });
-    return delay(buckets);
+    const equipment=await equipmentService.getEquipment(); const buckets=[{name:'0-7 días',total:0},{name:'8-15 días',total:0},{name:'16-30 días',total:0},{name:'31-90 días',total:0}]; const today=new Date(); today.setHours(0,0,0,0);
+    equipment.forEach(e=>{if(!e.nextInspectionDate)return; const date=new Date(e.nextInspectionDate); if(Number.isNaN(date.getTime()))return; const diff=Math.round((date.getTime()-today.getTime())/86400000); if(diff<0)return; if(diff<=7)buckets[0]!.total++;else if(diff<=15)buckets[1]!.total++;else if(diff<=30)buckets[2]!.total++;else if(diff<=90)buckets[3]!.total++;}); return buckets;
   },
   async getAlerts(): Promise<AlertItem[]> {
-    const alerts: AlertItem[] = [];
-    mockEquipment.forEach((e) => {
-      const product = mockProducts.find((p) => p.id === e.productId);
-      const label = `${product?.name ?? "Equipo"} · ${e.internalCode}`;
-      if (e.status === "vencido") {
-        alerts.push({
-          id: `al-${e.id}`,
-          severity: "danger",
-          title: "Inspección vencida",
-          message: `${label} tiene la inspección vencida desde ${e.nextInspectionDate}.`,
-          equipmentCode: e.internalCode,
-        });
-      } else if (e.status === "fuera_servicio") {
-        alerts.push({
-          id: `al-${e.id}`,
-          severity: "danger",
-          title: "Equipo fuera de servicio",
-          message: `${label} está bloqueado: ${e.notes ?? "revisar ficha del equipo"}.`,
-          equipmentCode: e.internalCode,
-        });
-      } else if (e.status === "proximo_vencer") {
-        alerts.push({
-          id: `al-${e.id}`,
-          severity: "warning",
-          title: "Inspección próxima",
-          message: `${label} debe inspeccionarse el ${e.nextInspectionDate}.`,
-          equipmentCode: e.internalCode,
-        });
-      }
-    });
-    return delay(alerts);
+    const [equipment,products]=await Promise.all([equipmentService.getEquipment(),productService.getProducts()]); const alerts:AlertItem[]=[];
+    equipment.forEach(e=>{const product=products.find(p=>p.id===e.productId); const label=`${product?.name??'Equipo'} · ${e.internalCode}`;
+      if(e.status==='vencido')alerts.push({id:`al-${e.id}`,severity:'danger',title:'Inspección vencida',message:`${label} tiene la inspección vencida desde ${e.nextInspectionDate}.`,equipmentCode:e.internalCode});
+      else if(e.status==='fuera_servicio')alerts.push({id:`al-${e.id}`,severity:'danger',title:'Equipo fuera de servicio',message:`${label} está bloqueado: ${e.notes??'revisar ficha del equipo'}.`,equipmentCode:e.internalCode});
+      else if(e.status==='proximo_vencer')alerts.push({id:`al-${e.id}`,severity:'warning',title:'Inspección próxima',message:`${label} debe inspeccionarse el ${e.nextInspectionDate}.`,equipmentCode:e.internalCode});}); return alerts;
   },
 };
 
@@ -392,66 +422,14 @@ export interface GlobalSearchResult {
 
 export const searchService = {
   async search(query: string): Promise<GlobalSearchResult[]> {
-    const q = query.trim().toLowerCase();
-    if (q.length < 2) return delay([], 40);
-    const results: GlobalSearchResult[] = [];
-
-    mockEquipment
-      .filter((e) => `${e.internalCode} ${e.serialNumber}`.toLowerCase().includes(q))
-      .slice(0, 6)
-      .forEach((e) => {
-        const product = mockProducts.find((p) => p.id === e.productId);
-        results.push({
-          id: e.id,
-          type: "equipo",
-          title: `${e.internalCode} · ${product?.name ?? ""}`,
-          subtitle: `Serie ${e.serialNumber} — ${e.status.replace(/_/g, " ")}`,
-          to: "/equipment/$code",
-          params: { code: e.internalCode },
-        });
-      });
-
-    mockProducts
-      .filter((p) => `${p.name} ${p.code} ${p.model}`.toLowerCase().includes(q))
-      .slice(0, 6)
-      .forEach((p) => {
-        results.push({
-          id: p.id,
-          type: "producto",
-          title: p.name,
-          subtitle: `${p.code} — ${p.equipmentType}`,
-          to: "/equipos/$productCode",
-          params: { productCode: p.code },
-        });
-      });
-
-    mockCategories
-      .filter((c) => c.name.toLowerCase().includes(q))
-      .slice(0, 4)
-      .forEach((c) => {
-        results.push({
-          id: c.id,
-          type: "categoria",
-          title: c.name,
-          subtitle: "Categoría del catálogo",
-          to: "/categorias",
-        });
-      });
-
-    mockUsers
-      .filter((u) => `${u.fullName} ${u.email}`.toLowerCase().includes(q))
-      .slice(0, 4)
-      .forEach((u) => {
-        results.push({
-          id: u.id,
-          type: "usuario",
-          title: u.fullName,
-          subtitle: `${u.email} — ${u.role}`,
-          to: "/admin/usuarios",
-        });
-      });
-
-    return delay(results, 60);
+    const q=query.trim().toLowerCase(); if(q.length<2)return [];
+    const [equipment,products,categories,users]=await Promise.all([equipmentService.getEquipment(),productService.getProducts(),categoryService.getCategories(),userService.getUsers()]);
+    const results:GlobalSearchResult[]=[];
+    equipment.filter(e=>`${e.internalCode} ${e.serialNumber}`.toLowerCase().includes(q)).slice(0,6).forEach(e=>{const product=products.find(p=>p.id===e.productId);results.push({id:e.id,type:'equipo',title:`${e.internalCode} · ${product?.name??''}`,subtitle:`Serie ${e.serialNumber} — ${e.status.replace(/_/g,' ')}`,to:'/equipos/unidad/$internalCode',params:{internalCode:e.internalCode}});});
+    products.filter(p=>`${p.name} ${p.code} ${p.model}`.toLowerCase().includes(q)).slice(0,6).forEach(p=>results.push({id:p.id,type:'producto',title:p.name,subtitle:`${p.code} — ${p.equipmentType}`,to:'/productos/$productCode',params:{productCode:p.code}}));
+    categories.filter(c=>c.name.toLowerCase().includes(q)).slice(0,4).forEach(c=>results.push({id:c.id,type:'categoria',title:c.name,subtitle:'Categoría del catálogo',to:'/categorias'}));
+    users.filter(u=>`${u.fullName} ${u.email}`.toLowerCase().includes(q)).slice(0,4).forEach(u=>results.push({id:u.id,type:'usuario',title:u.fullName,subtitle:`${u.email} — ${u.role}`,to:'/admin/usuarios'}));
+    return results;
   },
 };
 
@@ -478,72 +456,16 @@ function writeLocal<T>(key: string, value: T) {
 }
 
 async function warehouseApi<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const response = await fetch(`/.netlify/functions/api${path}`, {
-    ...init,
-    credentials: "same-origin",
-    headers: { "content-type": "application/json", ...(init.headers ?? {}) },
-  });
+  const response = await fetch(`/.netlify/functions/api${path}`, { ...init, credentials: "same-origin", headers: { "content-type": "application/json", ...(init.headers ?? {}) } });
   const payload = await response.json().catch(() => ({})) as { data?: T; error?: string };
   if (!response.ok) throw new Error(payload.error || `Error del servidor (${response.status}).`);
   return (payload.data ?? payload) as T;
 }
 
-/**
- * PostgreSQL's node-postgres driver returns NUMERIC/DECIMAL columns as strings.
- * Normalize the API payload at the service boundary so UI code can safely use
- * arithmetic and Number.prototype.toFixed without depending on PG type parsers.
- */
-function normalizeWarehouseProduct(value: unknown): WarehouseProduct {
-  const raw = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
-  const number = (key: string, fallback = 0): number => {
-    const parsed = typeof raw[key] === "number" ? raw[key] as number : Number(raw[key]);
-    return Number.isFinite(parsed) ? parsed : fallback;
-  };
-  const optionalNumber = (key: string): number | undefined => {
-    if (raw[key] === null || raw[key] === undefined || raw[key] === "") return undefined;
-    const parsed = typeof raw[key] === "number" ? raw[key] as number : Number(raw[key]);
-    return Number.isFinite(parsed) ? parsed : undefined;
-  };
-  const leadTimeDays = optionalNumber("leadTimeDays");
-  const safetyStock = optionalNumber("safetyStock");
-  const maxStock = optionalNumber("maxStock");
-  const minPurchaseQuantity = optionalNumber("minPurchaseQuantity");
-  const purchaseMultiple = optionalNumber("purchaseMultiple");
-  const dailyDemandEstimate = optionalNumber("dailyDemandEstimate");
-  const rawCurrency = raw["currency"];
-  const currency: WarehouseProduct["currency"] = rawCurrency === "USD" || rawCurrency === "EUR" || rawCurrency === "HNL" ? rawCurrency : "HNL";
-  return {
-    ...(raw as unknown as WarehouseProduct),
-    id: String(raw["id"] ?? ""),
-    productId: String(raw["productId"] ?? ""),
-    sku: String(raw["sku"] ?? ""),
-    name: String(raw["name"] ?? ""),
-    description: String(raw["description"] ?? ""),
-    image: String(raw["image"] ?? "/epp-harness.jpg"),
-    quantity: number("quantity"),
-    minStock: number("minStock"),
-    costPrice: number("costPrice"),
-    salePrice: number("salePrice"),
-    location: String(raw["location"] ?? ""),
-    supplier: String(raw["supplier"] ?? ""),
-    ...(leadTimeDays !== undefined ? { leadTimeDays } : {}),
-    ...(safetyStock !== undefined ? { safetyStock } : {}),
-    ...(maxStock !== undefined ? { maxStock } : {}),
-    ...(minPurchaseQuantity !== undefined ? { minPurchaseQuantity } : {}),
-    ...(purchaseMultiple !== undefined ? { purchaseMultiple } : {}),
-    ...(dailyDemandEstimate !== undefined ? { dailyDemandEstimate } : {}),
-    demandEstimateNotes: String(raw["demandEstimateNotes"] ?? ""),
-    currency,
-    active: raw["active"] !== false,
-    updatedAt: String(raw["updatedAt"] ?? ""),
-  };
-}
-
 export const warehouseService = {
   async getProducts(): Promise<WarehouseProduct[]> {
-    if (import.meta.env.DEV) return delay(clone(readLocal(WAREHOUSE_KEY, mockWarehouseProducts).map(normalizeWarehouseProduct)));
-    const products = await warehouseApi<unknown[]>("/warehouse-products");
-    return products.map(normalizeWarehouseProduct);
+    if (import.meta.env.DEV) return delay(clone(readLocal(WAREHOUSE_KEY, mockWarehouseProducts)));
+    return (await warehouseApi<unknown[]>("/warehouse-products")).map(mapWarehouseProduct);
   },
   async saveProducts(items: WarehouseProduct[]) {
     if (import.meta.env.DEV) { writeLocal(WAREHOUSE_KEY, items); return delay(clone(items)); }
@@ -559,8 +481,7 @@ export const warehouseService = {
       writeLocal(WAREHOUSE_KEY, items);
       return delay(clone(item));
     }
-    const saved = await warehouseApi<unknown>("/warehouse-products", { method: "POST", body: JSON.stringify(item) });
-    return normalizeWarehouseProduct(saved);
+    return mapWarehouseProduct(await warehouseApi<unknown>("/warehouse-products", { method: "POST", body: JSON.stringify(item) }));
   },
   async deleteProduct(id: string): Promise<boolean> {
     if (import.meta.env.DEV) {
@@ -575,11 +496,18 @@ export const warehouseService = {
 
 export const quoteService = {
   async getProfile(): Promise<QuoteCompanyProfile> {
-    return delay(readLocal(PROFILE_KEY, { name: "Vertical Safety", address: "Configura la dirección de tu empresa", phone: "Configura el teléfono", email: "", logoDataUrl: "/vertical-safety-logo.png" }));
+    const fallback: QuoteCompanyProfile = { name: "Vertical Safety", address: "", phone: "", email: "", logoDataUrl: "/vertical-safety-logo.png" };
+    if (import.meta.env.DEV) return delay(readLocal(PROFILE_KEY, fallback));
+    return warehouseApi<QuoteCompanyProfile>('/settings/quote-company').catch(() => fallback);
   },
-  async saveProfile(profile: QuoteCompanyProfile) { writeLocal(PROFILE_KEY, profile); return delay(profile); },
+  async saveProfile(profile: QuoteCompanyProfile) { if (import.meta.env.DEV) { writeLocal(PROFILE_KEY, profile); return delay(profile); } return warehouseApi<QuoteCompanyProfile>('/settings/quote-company',{method:'PUT',body:JSON.stringify({profile})}); },
   async buildQuote(customer: QuoteCustomer, items: { product: WarehouseProduct; quantity: number; unitPrice: number }[]) {
     return delay({ customer, items, subtotal: items.reduce((sum, x) => sum + x.quantity * x.unitPrice, 0) });
+  },
+  async saveQuote(customer: QuoteCustomer, items: { product: WarehouseProduct; quantity: number; unitPrice: number }[]) {
+    if (!items.length) throw new Error('Agrega al menos un producto a la cotización.');
+    if (import.meta.env.DEV) return delay({ ok: true as const, demo: true, customer, items });
+    return warehouseApi<Record<string, unknown>>('/quotes', { method: 'POST', body: JSON.stringify({ customer, items: items.map(item => ({ warehouseProductId: item.product.id, quantity: item.quantity, unitPrice: item.unitPrice })) }) });
   },
 };
 
@@ -599,9 +527,16 @@ export interface SaleDraft {
 
 export const salesService = {
   async getSales(): Promise<SaleRecord[]> {
+    if (!import.meta.env.DEV) return (await warehouseApi<unknown[]>('/sales')).map(value=>{const r=asRecord(value); const lines=arrayValue<Record<string,unknown>>(r['lines']).map(line=>({warehouseProductId:stringValue(pick(line,'warehouseProductId','warehouse_product_id')),sku:stringValue(line['sku']),name:stringValue(line['name']),quantity:numberValue(line['quantity']),unitPrice:numberValue(pick(line,'unitPrice','unit_price')),unitCost:numberValue(pick(line,'unitCost','unit_cost')),lineTotal:numberValue(pick(line,'lineTotal','line_total'))})); return {id:stringValue(r['id']),saleNumber:stringValue(pick(r,'saleNumber','sale_number')),soldAt:stringValue(pick(r,'soldAt','sold_at','created_at')),customerName:stringValue(pick(r,'customerName','customer_name')),customerContact:stringValue(pick(r,'customerContact','customer_contact')),paymentMethod:stringValue(pick(r,'paymentMethod','payment_method'),'otro') as SalePaymentMethod,notes:stringValue(r['notes']),lines,subtotal:numberValue(r['subtotal']),discount:numberValue(r['discount']),total:numberValue(r['total']),status:'completed' as const,createdBy:stringValue(pick(r,'createdBy','created_by'))}; });
     return delay(clone(readLocal<SaleRecord[]>(SALES_KEY, [])));
   },
   async registerSale(draft: SaleDraft): Promise<SaleRecord> {
+    if (!import.meta.env.DEV) {
+      if (!draft.lines.length) throw new Error('Agrega al menos un producto al carrito.');
+      const saved = await warehouseApi<unknown>('/sales',{method:'POST',body:JSON.stringify(draft)});
+      const r=asRecord(saved); const lines=arrayValue<Record<string,unknown>>(r['lines']).map(line=>({warehouseProductId:stringValue(pick(line,'warehouseProductId','warehouse_product_id')),sku:stringValue(line['sku']),name:stringValue(line['name']),quantity:numberValue(line['quantity']),unitPrice:numberValue(pick(line,'unitPrice','unit_price')),unitCost:numberValue(pick(line,'unitCost','unit_cost')),lineTotal:numberValue(pick(line,'lineTotal','line_total'))}));
+      return {id:stringValue(r['id']),saleNumber:stringValue(pick(r,'saleNumber','sale_number')),soldAt:stringValue(pick(r,'soldAt','sold_at','created_at')),customerName:stringValue(pick(r,'customerName','customer_name')),customerContact:stringValue(pick(r,'customerContact','customer_contact')),paymentMethod:stringValue(pick(r,'paymentMethod','payment_method'),'otro') as SalePaymentMethod,notes:stringValue(r['notes']),lines,subtotal:numberValue(r['subtotal']),discount:numberValue(r['discount']),total:numberValue(r['total']),status:'completed',createdBy:stringValue(pick(r,'createdBy','created_by'))};
+    }
     const products = readLocal(WAREHOUSE_KEY, mockWarehouseProducts);
     const currentSales = readLocal<SaleRecord[]>(SALES_KEY, []);
     if (!draft.lines.length) throw new Error("Agrega al menos un producto al carrito.");

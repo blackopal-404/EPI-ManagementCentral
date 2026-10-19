@@ -102,7 +102,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
             <button type="button" onClick={logout} className="ml-1 hidden items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground sm:flex"><LogOut className="h-4 w-4" /><span className="hidden xl:inline">Salir</span></button>
           </div>
           <div className="flex items-center gap-2 bg-primary/[0.055] px-4 py-1.5 text-[11px] font-medium text-muted-foreground sm:px-6">
-            <span className="h-1.5 w-1.5 rounded-full bg-primary" /> Zona administrativa: los movimientos se registran en el modo local de esta versión.
+            <span className="h-1.5 w-1.5 rounded-full bg-primary" /> {import.meta.env.DEV ? "Zona administrativa: los movimientos se registran en modo local de desarrollo." : "Zona administrativa: los cambios se guardan en PostgreSQL."}
           </div>
         </header>
         <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 sm:py-7">{children}</main>

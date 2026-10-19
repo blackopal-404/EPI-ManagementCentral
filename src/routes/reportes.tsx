@@ -17,7 +17,7 @@ function ReportsPage() {
     setBusy(id + format);
     try {
       await reportService.export(id, format);
-      alert(`Exportación demo preparada en formato ${format.toUpperCase()}.`);
+      alert(import.meta.env.DEV ? `Exportación de demostración preparada en formato ${format.toUpperCase()}.` : format === "excel" ? "Se descargó el reporte en CSV, compatible con Excel." : "Se abrió el reporte para imprimirlo o guardarlo como PDF.");
     } finally {
       setBusy(null);
     }
@@ -29,7 +29,7 @@ function ReportsPage() {
         <p className="label-caps">Información operativa</p>
         <h1 className="mt-1 font-display text-2xl font-extrabold">Reportes</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          Catálogo de reportes preparados para una futura exportación real desde backend.
+          Reportes construidos con los registros reales guardados en PostgreSQL.
         </p>
       </header>
 

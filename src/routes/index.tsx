@@ -1,11 +1,10 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ArrowRight, Boxes, CheckCircle2, ClipboardCheck, Plus, ScanLine, Warehouse, XCircle, AlertTriangle } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
-import { dashboardService, equipmentService, inspectionService, userService } from "@/services";
+import { dashboardService, equipmentService, inspectionService, productService, userService } from "@/services";
 import { MetricCard } from "@/components/common/MetricCard";
 import { SectionCard } from "@/components/common/SectionCard";
 import { InspectionResultBadge } from "@/components/common/StatusBadge";
-import { getProductById } from "@/data/mock/products";
 
 export const Route = createFileRoute("/")({ component: HomePage });
 
@@ -19,6 +18,7 @@ function HomePage() {
   const categories = useQuery({ queryKey: ["dashboard", "categories"], queryFn: dashboardService.getByCategory });
   const inspections = useQuery({ queryKey: ["inspections", "recent"], queryFn: inspectionService.getInspections });
   const users = useQuery({ queryKey: ["users"], queryFn: userService.getUsers });
+  const products = useQuery({ queryKey: ["products"], queryFn: () => productService.getProducts() });
 
   const recent = (equipment.data ?? []).slice(0, 4);
   const recentInspections = (inspections.data ?? []).slice(0, 5);
@@ -85,7 +85,7 @@ function HomePage() {
               <tbody className="divide-y divide-border">
                 {recentInspections.map((inspection) => {
                   const eq = equipment.data?.find((x) => x.id === inspection.equipmentId);
-                  const product = eq ? getProductById(eq.productId) : undefined;
+                  const product = eq ? products.data?.find(p => p.id === eq.productId) : undefined;
                   const inspector = users.data?.find((u) => u.id === inspection.inspectorId)?.fullName ?? "—";
                   return <tr key={inspection.id} className="hover:bg-muted/30"><td className="px-4 py-3 whitespace-nowrap">{formatDate(inspection.date)}</td><td className="px-4 py-3 mono-code text-xs">{eq?.internalCode ?? "—"}</td><td className="px-4 py-3 font-medium">{product?.name ?? "Equipo"}</td><td className="px-4 py-3"><InspectionResultBadge result={inspection.result} /></td><td className="px-4 py-3 whitespace-nowrap">{inspector}</td></tr>;
                 })}
@@ -109,7 +109,7 @@ function HomePage() {
         <SectionCard title="Últimos equipos agregados" action={<Link to="/equipos" className="text-sm font-semibold text-primary">Ver todos</Link>}>
           <div className="divide-y divide-border">
             {recent.map((e) => {
-              const product = getProductById(e.productId);
+              const product = products.data?.find(p => p.id === e.productId);
               return <Link key={e.id} to="/equipos/unidad/$internalCode" params={{ internalCode: e.internalCode }} className="grid grid-cols-[56px_70px_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3.5 transition hover:bg-muted/30 sm:px-5">
                 <div className="grid h-11 w-11 place-items-center overflow-hidden rounded-md bg-muted"><img src={product?.images.find((image) => image.isPrimary)?.url ?? product?.images[0]?.url ?? "/epp-harness.jpg"} alt="" className="h-full w-full object-contain" /></div>
                 <span className="mono-code text-xs">{e.internalCode}</span>
