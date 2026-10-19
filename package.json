@@ -46,8 +46,7 @@
     "@tanstack/react-query": "^5.101.1",
     "@tanstack/react-router": "^1.170.33",
     "@tanstack/react-start": "^1.168.50",
-    "@zxing/browser": "^0.1.5",
-    "@zxing/library": "^0.21.3",
+    "@zxing/browser": "^0.2.1",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "cmdk": "^1.1.1",
@@ -67,11 +66,12 @@
     "tw-animate-css": "^1.3.4",
     "vaul": "^1.1.2",
     "vite-tsconfig-paths": "^6.0.2",
-    "zod": "^3.25.76"
+    "zod": "^3.25.76",
+    "@netlify/functions": "^3.1.10",
+    "pg": "^8.16.3"
   },
   "devDependencies": {
     "@eslint/js": "^9.32.0",
-    "@netlify/vite-plugin-tanstack-start": "^1.3.19",
     "@types/node": "^22.16.5",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
@@ -85,7 +85,9 @@
     "prettier": "^3.7.3",
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.56.1",
-    "vite": "^8.1.5"
+    "vite": "^8.1.5",
+    "@netlify/vite-plugin-tanstack-start": "^1.3.19",
+    "@types/pg": "^8.15.5"
   },
   "engines": {
     "node": "^20.19.0 || >=22.12.0"

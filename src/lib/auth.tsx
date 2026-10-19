@@ -16,18 +16,25 @@ function readSession(): AppUser | null {
 }
 export function isMagnaEmail(email: string) { return MAGNA_EMAILS.includes(email.toLowerCase()) || (import.meta.env.DEV && email.toLowerCase() === "magna@local.test"); }
 export function saveSession(user: AppUser) { localStorage.setItem(AUTH_KEY, JSON.stringify(user)); window.dispatchEvent(new Event("sgh-auth")); }
-export function clearSession() { localStorage.removeItem(AUTH_KEY); window.dispatchEvent(new Event("sgh-auth")); }
-
-function decodeCredential(credential: string): { name?: string; email?: string; picture?: string } {
-  try { const payload = credential.split(".")[1]; if (!payload) return {}; return JSON.parse(atob(payload.replace(/-/g, "+").replace(/_/g, "/"))); } catch { return {}; }
+export function clearSession() {
+  localStorage.removeItem(AUTH_KEY);
+  if (typeof window !== "undefined") {
+    void fetch("/.netlify/functions/api/auth/logout", { method: "POST", credentials: "same-origin" }).catch(() => undefined);
+    window.dispatchEvent(new Event("sgh-auth"));
+  }
 }
 
 export async function handleGoogleCredential(credential: string) {
-  const data = decodeCredential(credential);
-  if (!data.email) throw new Error("Google no devolvió un correo válido.");
-  const email = data.email;
-  const user: AppUser = { name: data.name || email.split("@")[0] || email, email, ...(data.picture ? { picture: data.picture } : {}), role: isMagnaEmail(email) ? "magna" : "usuario" };
-  saveSession(user);
+  const response = await fetch("/.netlify/functions/api/auth/google", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    credentials: "same-origin",
+    body: JSON.stringify({ credential }),
+  });
+  const payload = await response.json().catch(() => ({})) as { user?: { id: string; name: string; email: string; picture?: string; role: "magna" | "usuario" }; error?: string };
+  if (!response.ok || !payload.user) throw new Error(payload.error ?? "No se pudo validar la sesión en el servidor.");
+  const user: AppUser = { name: payload.user.name, email: payload.user.email, ...(payload.user.picture ? { picture: payload.user.picture } : {}), role: payload.user.role };
+  saveSession(user); // Solo estado de presentación; la autorización real se verifica en el servidor.
   return user;
 }
 
@@ -59,7 +66,26 @@ const AuthContext = createContext<{ user: AppUser | null; ready: boolean; logout
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AppUser | null>(() => readSession());
   const [ready, setReady] = useState(false);
-  useEffect(() => { const sync = () => setUser(readSession()); sync(); setReady(true); window.addEventListener("sgh-auth", sync); return () => window.removeEventListener("sgh-auth", sync); }, []);
+  useEffect(() => {
+    let active = true;
+    const sync = () => setUser(readSession());
+    const verifyServerSession = async () => {
+      const localDemo = readSession();
+      if (import.meta.env.DEV && localDemo?.email === "magna@local.test") { setUser(localDemo); setReady(true); return; }
+      try {
+        const response = await fetch("/.netlify/functions/api/auth/session", { credentials: "same-origin", cache: "no-store" });
+        if (!active) return;
+        if (!response.ok) { localStorage.removeItem(AUTH_KEY); setUser(null); return; }
+        const payload = await response.json() as { user?: { name: string; email: string; role: "magna" | "usuario" } };
+        if (payload.user) { const verified = { ...payload.user }; localStorage.setItem(AUTH_KEY, JSON.stringify(verified)); setUser(verified); }
+        else { localStorage.removeItem(AUTH_KEY); setUser(null); }
+      } catch { if (active) setUser(null); }
+      finally { if (active) setReady(true); }
+    };
+    window.addEventListener("sgh-auth", sync);
+    void verifyServerSession();
+    return () => { active = false; window.removeEventListener("sgh-auth", sync); };
+  }, []);
   const value = useMemo(() => ({ user, ready, logout: clearSession }), [user, ready]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }

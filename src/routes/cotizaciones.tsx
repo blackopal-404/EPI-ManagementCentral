@@ -13,7 +13,7 @@ function QuotesPage(){
  const [items,setItems]=useState<Record<string,number>>({}); const [profile,setProfile]=useState<QuoteCompanyProfile>({name:"Vertical Safety",address:"",phone:"",email:"",logoDataUrl:"/vertical-safety-logo.png"});
  const [customer,setCustomer]=useState<QuoteCustomer>({companyName:"",contactName:"",place:"",date:new Date().toISOString().slice(0,10),notes:""});
  useEffect(()=>{quoteService.getProfile().then(setProfile)},[]);
- const selected=useMemo(()=>products.flatMap(p=>{const quantity=items[p.id]??0;return quantity>0?[{product:p,quantity,unitPrice:p.salePrice}]:[]}),[products,items]);
+ const selected=useMemo(()=>products.map(p=>({product:p,quantity:items[p.id] ?? 0,unitPrice:p.salePrice})).filter(x=>x.quantity>0),[products,items]);
  const total=selected.reduce((a,x)=>a+x.quantity*x.unitPrice,0);
  function add(p:WarehouseProduct){setItems(x=>({...x,[p.id]:Math.min(p.quantity,(x[p.id]??0)+1)}))} function sub(p:WarehouseProduct){setItems(x=>({...x,[p.id]:Math.max(0,(x[p.id]??0)-1)}))}
  function print(){if(!selected.length){alert("Agrega al menos un producto a la cotización.");return} window.print()}

@@ -111,7 +111,7 @@ function HomePage() {
             {recent.map((e) => {
               const product = getProductById(e.productId);
               return <Link key={e.id} to="/equipos/unidad/$internalCode" params={{ internalCode: e.internalCode }} className="grid grid-cols-[56px_70px_minmax(0,1fr)_auto] items-center gap-3 px-4 py-3.5 transition hover:bg-muted/30 sm:px-5">
-                <div className="grid h-11 w-11 place-items-center overflow-hidden rounded-md bg-muted"><img src={product?.images?.find((image) => image.isPrimary)?.url ?? product?.images?.[0]?.url ?? "/epp-harness.jpg"} alt="" className="h-full w-full object-contain" /></div>
+                <div className="grid h-11 w-11 place-items-center overflow-hidden rounded-md bg-muted"><img src={product?.images.find((image) => image.isPrimary)?.url ?? product?.images[0]?.url ?? "/epp-harness.jpg"} alt="" className="h-full w-full object-contain" /></div>
                 <span className="mono-code text-xs">{e.internalCode}</span>
                 <span className="truncate text-sm font-semibold">{product?.name ?? "Equipo"}</span>
                 <span className="hidden text-xs text-muted-foreground sm:block">{e.location}</span>

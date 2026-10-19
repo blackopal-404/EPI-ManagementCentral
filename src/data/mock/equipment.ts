@@ -75,9 +75,9 @@ const rows: Row[] = [
 
 const counters: Record<string, number> = {};
 
-export const mockEquipment: Equipment[] = import.meta.env.DEV ? rows.flatMap((row, i) => {
+export const mockEquipment: Equipment[] = import.meta.env.DEV ? rows.map((row, i): Equipment | null => {
   const product = mockProducts[row.productIndex];
-  if (!product) return [];
+  if (!product) return null;
   const prefix = prefixes[product.categoryId] ?? "EPI";
   counters[prefix] = (counters[prefix] ?? 0) + 1;
   const internalCode = `${prefix}-${String(counters[prefix]).padStart(4, "0")}`;
@@ -91,7 +91,7 @@ export const mockEquipment: Equipment[] = import.meta.env.DEV ? rows.flatMap((ro
     manufacturingDate: `${2022 + (i % 4)}-0${(i % 9) + 1}-1${i % 9}`,
     purchaseDate: `${2023 + (i % 3)}-0${(i % 9) + 1}-2${i % 8}`,
     commissioningDate: `${2023 + (i % 3)}-1${i % 2}-0${(i % 8) + 1}`,
-    location: locations[i % locations.length] ?? "Bodega principal",
+    location: locations[i % locations.length] ?? "Sin ubicación",
     ...(row.userId ? { assignedUserId: row.userId } : {}),
     ...(row.last ? { lastInspectionDate: row.last } : {}),
     ...(row.next ? { nextInspectionDate: row.next } : {}),
@@ -102,7 +102,7 @@ export const mockEquipment: Equipment[] = import.meta.env.DEV ? rows.flatMap((ro
     createdAt: "2025-01-10T09:00:00Z",
     updatedAt: "2026-09-01T09:00:00Z",
   };
-}) : [];
+}).filter((item): item is Equipment => item !== null) : [];
 
 export const getEquipment = (id: string) => mockEquipment.find((e) => e.id === id);
 export const getEquipmentByCode = (code: string) =>

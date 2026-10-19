@@ -52,10 +52,9 @@ function AdminEquipment() {
       alert("Ya existe un equipo con ese código interno, número de serie o código Data Matrix.");
       return;
     }
-    const { dataMatrixCode, ...equipmentWithoutDataMatrix } = item;
     await equipmentService.upsertEquipment({
-      ...equipmentWithoutDataMatrix,
-      ...(dataMatrixCode?.trim() ? { dataMatrixCode: dataMatrixCode.trim() } : {}),
+      ...item,
+      ...(item.dataMatrixCode?.trim() ? { dataMatrixCode: item.dataMatrixCode.trim() } : {}),
       qrCode: item.qrCode.trim() || `EQUIPMENT:${item.internalCode}`,
       updatedAt: new Date().toISOString(),
     });
