@@ -488,10 +488,54 @@ async function warehouseApi<T>(path: string, init: RequestInit = {}): Promise<T>
   return (payload.data ?? payload) as T;
 }
 
+/**
+ * PostgreSQL's node-postgres driver returns NUMERIC/DECIMAL columns as strings.
+ * Normalize the API payload at the service boundary so UI code can safely use
+ * arithmetic and Number.prototype.toFixed without depending on PG type parsers.
+ */
+function normalizeWarehouseProduct(value: unknown): WarehouseProduct {
+  const raw = (value && typeof value === "object" ? value : {}) as Record<string, unknown>;
+  const number = (key: string, fallback = 0): number => {
+    const parsed = typeof raw[key] === "number" ? raw[key] as number : Number(raw[key]);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  };
+  const optionalNumber = (key: string): number | undefined => {
+    if (raw[key] === null || raw[key] === undefined || raw[key] === "") return undefined;
+    const parsed = typeof raw[key] === "number" ? raw[key] as number : Number(raw[key]);
+    return Number.isFinite(parsed) ? parsed : undefined;
+  };
+  return {
+    ...(raw as unknown as WarehouseProduct),
+    id: String(raw.id ?? ""),
+    productId: String(raw.productId ?? ""),
+    sku: String(raw.sku ?? ""),
+    name: String(raw.name ?? ""),
+    description: String(raw.description ?? ""),
+    image: String(raw.image ?? "/epp-harness.jpg"),
+    quantity: number("quantity"),
+    minStock: number("minStock"),
+    costPrice: number("costPrice"),
+    salePrice: number("salePrice"),
+    location: String(raw.location ?? ""),
+    supplier: String(raw.supplier ?? ""),
+    leadTimeDays: optionalNumber("leadTimeDays"),
+    safetyStock: optionalNumber("safetyStock"),
+    maxStock: optionalNumber("maxStock"),
+    minPurchaseQuantity: optionalNumber("minPurchaseQuantity"),
+    purchaseMultiple: optionalNumber("purchaseMultiple"),
+    dailyDemandEstimate: optionalNumber("dailyDemandEstimate"),
+    demandEstimateNotes: String(raw.demandEstimateNotes ?? ""),
+    currency: raw.currency === "USD" || raw.currency === "EUR" ? raw.currency : "HNL",
+    active: raw.active !== false,
+    updatedAt: String(raw.updatedAt ?? ""),
+  };
+}
+
 export const warehouseService = {
   async getProducts(): Promise<WarehouseProduct[]> {
-    if (import.meta.env.DEV) return delay(clone(readLocal(WAREHOUSE_KEY, mockWarehouseProducts)));
-    return warehouseApi<WarehouseProduct[]>("/warehouse-products");
+    if (import.meta.env.DEV) return delay(clone(readLocal(WAREHOUSE_KEY, mockWarehouseProducts).map(normalizeWarehouseProduct)));
+    const products = await warehouseApi<unknown[]>("/warehouse-products");
+    return products.map(normalizeWarehouseProduct);
   },
   async saveProducts(items: WarehouseProduct[]) {
     if (import.meta.env.DEV) { writeLocal(WAREHOUSE_KEY, items); return delay(clone(items)); }
@@ -507,7 +551,8 @@ export const warehouseService = {
       writeLocal(WAREHOUSE_KEY, items);
       return delay(clone(item));
     }
-    return warehouseApi<WarehouseProduct>("/warehouse-products", { method: "POST", body: JSON.stringify(item) });
+    const saved = await warehouseApi<unknown>("/warehouse-products", { method: "POST", body: JSON.stringify(item) });
+    return normalizeWarehouseProduct(saved);
   },
   async deleteProduct(id: string): Promise<boolean> {
     if (import.meta.env.DEV) {
