@@ -202,7 +202,7 @@ export const codeService = {
    * Un Data Matrix de Petzl puede entregar directamente el número de serie.
    */
   parse(raw: string): string | null {
-    const value = raw.trim();
+    const value = raw["trim"]();
     if (!value) return null;
     if (value.toUpperCase().startsWith("EQUIPMENT:")) return value.slice(10).trim();
     const match = value.match(/\/equipment\/([^/?#]+)/i);
@@ -504,30 +504,38 @@ function normalizeWarehouseProduct(value: unknown): WarehouseProduct {
     const parsed = typeof raw[key] === "number" ? raw[key] as number : Number(raw[key]);
     return Number.isFinite(parsed) ? parsed : undefined;
   };
+  const leadTimeDays = optionalNumber("leadTimeDays");
+  const safetyStock = optionalNumber("safetyStock");
+  const maxStock = optionalNumber("maxStock");
+  const minPurchaseQuantity = optionalNumber("minPurchaseQuantity");
+  const purchaseMultiple = optionalNumber("purchaseMultiple");
+  const dailyDemandEstimate = optionalNumber("dailyDemandEstimate");
+  const rawCurrency = raw["currency"];
+  const currency: WarehouseProduct["currency"] = rawCurrency === "USD" || rawCurrency === "EUR" || rawCurrency === "HNL" ? rawCurrency : "HNL";
   return {
     ...(raw as unknown as WarehouseProduct),
-    id: String(raw.id ?? ""),
-    productId: String(raw.productId ?? ""),
-    sku: String(raw.sku ?? ""),
-    name: String(raw.name ?? ""),
-    description: String(raw.description ?? ""),
-    image: String(raw.image ?? "/epp-harness.jpg"),
+    id: String(raw["id"] ?? ""),
+    productId: String(raw["productId"] ?? ""),
+    sku: String(raw["sku"] ?? ""),
+    name: String(raw["name"] ?? ""),
+    description: String(raw["description"] ?? ""),
+    image: String(raw["image"] ?? "/epp-harness.jpg"),
     quantity: number("quantity"),
     minStock: number("minStock"),
     costPrice: number("costPrice"),
     salePrice: number("salePrice"),
-    location: String(raw.location ?? ""),
-    supplier: String(raw.supplier ?? ""),
-    leadTimeDays: optionalNumber("leadTimeDays"),
-    safetyStock: optionalNumber("safetyStock"),
-    maxStock: optionalNumber("maxStock"),
-    minPurchaseQuantity: optionalNumber("minPurchaseQuantity"),
-    purchaseMultiple: optionalNumber("purchaseMultiple"),
-    dailyDemandEstimate: optionalNumber("dailyDemandEstimate"),
-    demandEstimateNotes: String(raw.demandEstimateNotes ?? ""),
-    currency: raw.currency === "USD" || raw.currency === "EUR" ? raw.currency : "HNL",
-    active: raw.active !== false,
-    updatedAt: String(raw.updatedAt ?? ""),
+    location: String(raw["location"] ?? ""),
+    supplier: String(raw["supplier"] ?? ""),
+    ...(leadTimeDays !== undefined ? { leadTimeDays } : {}),
+    ...(safetyStock !== undefined ? { safetyStock } : {}),
+    ...(maxStock !== undefined ? { maxStock } : {}),
+    ...(minPurchaseQuantity !== undefined ? { minPurchaseQuantity } : {}),
+    ...(purchaseMultiple !== undefined ? { purchaseMultiple } : {}),
+    ...(dailyDemandEstimate !== undefined ? { dailyDemandEstimate } : {}),
+    demandEstimateNotes: String(raw["demandEstimateNotes"] ?? ""),
+    currency,
+    active: raw["active"] !== false,
+    updatedAt: String(raw["updatedAt"] ?? ""),
   };
 }
 
