@@ -1,0 +1,30 @@
+CORRECCION DE PUBLICACION DE LA API PARA NETLIFY
+
+Motivo
+El build de TanStack Start está configurando la carpeta de funciones como built-lambda, mientras que la API personalizada se encuentra en netlify/functions/api.ts. Por eso la URL /.netlify/functions/api/... responde 404 si esa función no se copia a la carpeta que Netlify publica.
+
+Archivo incluido
+scripts/copy-netlify-api.mjs
+
+Instalación
+1. Copia la carpeta scripts dentro de la raíz del proyecto EPI-ManagementCentral.
+2. Abre package.json y localiza:
+   "build": "vite build && tsc --noEmit"
+3. Cámbialo por:
+   "build": "vite build && tsc --noEmit && node scripts/copy-netlify-api.mjs"
+4. Guarda el archivo y ejecuta:
+   npm run build
+5. Comprueba que exista built-lambda/api.ts:
+   Test-Path "built-lambda\api.ts"
+   Debe responder True.
+6. Revisa el cambio y súbelo a GitHub:
+   git status --short
+   git add package.json scripts/copy-netlify-api.mjs
+   git commit -m "fix: include custom API in Netlify functions build"
+   git push
+
+Notas
+- No cambies netlify.toml ni la configuración del plugin TanStack Start en este intento.
+- No incluyas archivos .env ni credenciales.
+- Esta corrección está dirigida al 404 de la función. Después del despliegue, prueba /.netlify/functions/api/health.
+- Si Netlify cambia la carpeta de funciones en un futuro build, revisa el registro de build y ajusta el destino.
