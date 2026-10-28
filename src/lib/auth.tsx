@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
 
-export type AppUser = { name: string; email: string; picture?: string; role: "magna" | "usuario" };
+export type AppUser = { name: string; email: string; picture?: string; role: string; permissions?: string[] };
 const AUTH_KEY = "sgh:auth";
 const MAGNA_EMAILS = (import.meta.env["VITE_MAGNA_EMAILS"] ?? "").split(",").map((x: string) => x.trim().toLowerCase()).filter(Boolean);
 
@@ -9,9 +9,7 @@ function readSession(): AppUser | null {
   try {
     const stored = JSON.parse(localStorage.getItem(AUTH_KEY) ?? "null") as AppUser | null;
     if (!stored?.email) return null;
-    // Recalcula el rol usando la lista autorizada actual. Evita que una sesión antigua
-    // conserve el rol "usuario" después de autorizar el correo como Magna (o viceversa).
-    return { ...stored, role: isMagnaEmail(stored.email) ? "magna" : "usuario" };
+    return { ...stored, role: isMagnaEmail(stored.email) ? "magna" : stored.role };
   } catch { return null; }
 }
 export function isMagnaEmail(email: string) { return MAGNA_EMAILS.includes(email.toLowerCase()) || (import.meta.env.DEV && email.toLowerCase() === "magna@local.test"); }
@@ -24,6 +22,15 @@ export function clearSession() {
   }
 }
 
+export async function handlePasswordLogin(username: string, password: string) {
+  const response = await fetch('/.netlify/functions/api/auth/password', { method: 'POST', headers: { 'content-type': 'application/json' }, credentials: 'same-origin', body: JSON.stringify({ username, password }) });
+  const payload = await response.json().catch(() => ({})) as { user?: { id: string; name: string; email: string; role: string; permissions?: string[] }; error?: string };
+  if (!response.ok || !payload.user) throw new Error(payload.error ?? 'No se pudo iniciar sesión.');
+  const user: AppUser = { name: payload.user.name, email: payload.user.email, role: payload.user.role, ...(payload.user.permissions ? { permissions: payload.user.permissions } : {}) };
+  saveSession(user);
+  return user;
+}
+
 export async function handleGoogleCredential(credential: string) {
   const response = await fetch("/.netlify/functions/api/auth/google", {
     method: "POST",
@@ -31,9 +38,9 @@ export async function handleGoogleCredential(credential: string) {
     credentials: "same-origin",
     body: JSON.stringify({ credential }),
   });
-  const payload = await response.json().catch(() => ({})) as { user?: { id: string; name: string; email: string; picture?: string; role: "magna" | "usuario" }; error?: string };
+  const payload = await response.json().catch(() => ({})) as { user?: { id: string; name: string; email: string; picture?: string; role: string; permissions?: string[] }; error?: string };
   if (!response.ok || !payload.user) throw new Error(payload.error ?? "No se pudo validar la sesión en el servidor.");
-  const user: AppUser = { name: payload.user.name, email: payload.user.email, ...(payload.user.picture ? { picture: payload.user.picture } : {}), role: payload.user.role };
+  const user: AppUser = { name: payload.user.name, email: payload.user.email, ...(payload.user.picture ? { picture: payload.user.picture } : {}), role: payload.user.role, ...(payload.user.permissions ? { permissions: payload.user.permissions } : {}) };
   saveSession(user); // Solo estado de presentación; la autorización real se verifica en el servidor.
   return user;
 }
@@ -76,7 +83,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const response = await fetch("/.netlify/functions/api/auth/session", { credentials: "same-origin", cache: "no-store" });
         if (!active) return;
         if (!response.ok) { localStorage.removeItem(AUTH_KEY); setUser(null); return; }
-        const payload = await response.json() as { user?: { name: string; email: string; role: "magna" | "usuario" } };
+        const payload = await response.json() as { user?: { name: string; email: string; role: string; permissions?: string[] } };
         if (payload.user) { const verified = { ...payload.user }; localStorage.setItem(AUTH_KEY, JSON.stringify(verified)); setUser(verified); }
         else { localStorage.removeItem(AUTH_KEY); setUser(null); }
       } catch { if (active) setUser(null); }

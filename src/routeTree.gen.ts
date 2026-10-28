@@ -14,17 +14,21 @@ import { Route as CotizacionesRouteImport } from './routes/cotizaciones'
 import { Route as InspeccionesRouteImport } from './routes/inspecciones'
 import { Route as InventarioRouteImport } from './routes/inventario'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as ReporteInspeccionesRouteImport } from './routes/reporte-inspecciones'
 import { Route as ReportesRouteImport } from './routes/reportes'
 import { Route as ScanRouteImport } from './routes/scan'
 import { Route as AdminIndexRouteImport } from './routes/admin/index'
 import { Route as AdminBodegaRouteImport } from './routes/admin/bodega'
 import { Route as AdminCategoriasRouteImport } from './routes/admin/categorias'
 import { Route as AdminConfiguracionRouteImport } from './routes/admin/configuracion'
+import { Route as AdminCotizadorRouteImport } from './routes/admin/cotizador'
+import { Route as AdminEmpresasRouteImport } from './routes/admin/empresas'
 import { Route as AdminEquiposRouteImport } from './routes/admin/equipos'
 import { Route as AdminInspeccionesRouteImport } from './routes/admin/inspecciones'
 import { Route as AdminInventarioRouteImport } from './routes/admin/inventario'
 import { Route as AdminPlanComprasRouteImport } from './routes/admin/plan-compras'
 import { Route as AdminProductosRouteImport } from './routes/admin/productos'
+import { Route as AdminReporteInspeccionesRouteImport } from './routes/admin/reporte-inspecciones'
 import { Route as AdminReportesRouteImport } from './routes/admin/reportes'
 import { Route as AdminUsuariosRouteImport } from './routes/admin/usuarios'
 import { Route as AdminVentasRouteImport } from './routes/admin/ventas'
@@ -59,6 +63,11 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReporteInspeccionesRoute = ReporteInspeccionesRouteImport.update({
+  id: '/reporte-inspecciones',
+  path: '/reporte-inspecciones',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ReportesRoute = ReportesRouteImport.update({
   id: '/reportes',
   path: '/reportes',
@@ -89,6 +98,16 @@ const AdminConfiguracionRoute = AdminConfiguracionRouteImport.update({
   path: '/admin/configuracion',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminCotizadorRoute = AdminCotizadorRouteImport.update({
+  id: '/admin/cotizador',
+  path: '/admin/cotizador',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const AdminEmpresasRoute = AdminEmpresasRouteImport.update({
+  id: '/admin/empresas',
+  path: '/admin/empresas',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AdminEquiposRoute = AdminEquiposRouteImport.update({
   id: '/admin/equipos',
   path: '/admin/equipos',
@@ -114,6 +133,12 @@ const AdminProductosRoute = AdminProductosRouteImport.update({
   path: '/admin/productos',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminReporteInspeccionesRoute =
+  AdminReporteInspeccionesRouteImport.update({
+    id: '/admin/reporte-inspecciones',
+    path: '/admin/reporte-inspecciones',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const AdminReportesRoute = AdminReportesRouteImport.update({
   id: '/admin/reportes',
   path: '/admin/reportes',
@@ -162,16 +187,20 @@ export interface FileRoutesByFullPath {
   '/inspecciones': typeof InspeccionesRoute
   '/inventario': typeof InventarioRoute
   '/login': typeof LoginRoute
+  '/reporte-inspecciones': typeof ReporteInspeccionesRoute
   '/reportes': typeof ReportesRoute
   '/scan': typeof ScanRoute
   '/admin/bodega': typeof AdminBodegaRoute
   '/admin/categorias': typeof AdminCategoriasRoute
   '/admin/configuracion': typeof AdminConfiguracionRoute
+  '/admin/cotizador': typeof AdminCotizadorRoute
+  '/admin/empresas': typeof AdminEmpresasRoute
   '/admin/equipos': typeof AdminEquiposRoute
   '/admin/inspecciones': typeof AdminInspeccionesRoute
   '/admin/inventario': typeof AdminInventarioRoute
   '/admin/plan-compras': typeof AdminPlanComprasRoute
   '/admin/productos': typeof AdminProductosRoute
+  '/admin/reporte-inspecciones': typeof AdminReporteInspeccionesRoute
   '/admin/reportes': typeof AdminReportesRoute
   '/admin/usuarios': typeof AdminUsuariosRoute
   '/admin/ventas': typeof AdminVentasRoute
@@ -188,16 +217,20 @@ export interface FileRoutesByTo {
   '/inspecciones': typeof InspeccionesRoute
   '/inventario': typeof InventarioRoute
   '/login': typeof LoginRoute
+  '/reporte-inspecciones': typeof ReporteInspeccionesRoute
   '/reportes': typeof ReportesRoute
   '/scan': typeof ScanRoute
   '/admin/bodega': typeof AdminBodegaRoute
   '/admin/categorias': typeof AdminCategoriasRoute
   '/admin/configuracion': typeof AdminConfiguracionRoute
+  '/admin/cotizador': typeof AdminCotizadorRoute
+  '/admin/empresas': typeof AdminEmpresasRoute
   '/admin/equipos': typeof AdminEquiposRoute
   '/admin/inspecciones': typeof AdminInspeccionesRoute
   '/admin/inventario': typeof AdminInventarioRoute
   '/admin/plan-compras': typeof AdminPlanComprasRoute
   '/admin/productos': typeof AdminProductosRoute
+  '/admin/reporte-inspecciones': typeof AdminReporteInspeccionesRoute
   '/admin/reportes': typeof AdminReportesRoute
   '/admin/usuarios': typeof AdminUsuariosRoute
   '/admin/ventas': typeof AdminVentasRoute
@@ -215,16 +248,20 @@ export interface FileRoutesById {
   '/inspecciones': typeof InspeccionesRoute
   '/inventario': typeof InventarioRoute
   '/login': typeof LoginRoute
+  '/reporte-inspecciones': typeof ReporteInspeccionesRoute
   '/reportes': typeof ReportesRoute
   '/scan': typeof ScanRoute
   '/admin/bodega': typeof AdminBodegaRoute
   '/admin/categorias': typeof AdminCategoriasRoute
   '/admin/configuracion': typeof AdminConfiguracionRoute
+  '/admin/cotizador': typeof AdminCotizadorRoute
+  '/admin/empresas': typeof AdminEmpresasRoute
   '/admin/equipos': typeof AdminEquiposRoute
   '/admin/inspecciones': typeof AdminInspeccionesRoute
   '/admin/inventario': typeof AdminInventarioRoute
   '/admin/plan-compras': typeof AdminPlanComprasRoute
   '/admin/productos': typeof AdminProductosRoute
+  '/admin/reporte-inspecciones': typeof AdminReporteInspeccionesRoute
   '/admin/reportes': typeof AdminReportesRoute
   '/admin/usuarios': typeof AdminUsuariosRoute
   '/admin/ventas': typeof AdminVentasRoute
@@ -243,16 +280,20 @@ export interface FileRouteTypes {
     | '/inspecciones'
     | '/inventario'
     | '/login'
+    | '/reporte-inspecciones'
     | '/reportes'
     | '/scan'
     | '/admin/bodega'
     | '/admin/categorias'
     | '/admin/configuracion'
+    | '/admin/cotizador'
+    | '/admin/empresas'
     | '/admin/equipos'
     | '/admin/inspecciones'
     | '/admin/inventario'
     | '/admin/plan-compras'
     | '/admin/productos'
+    | '/admin/reporte-inspecciones'
     | '/admin/reportes'
     | '/admin/usuarios'
     | '/admin/ventas'
@@ -269,16 +310,20 @@ export interface FileRouteTypes {
     | '/inspecciones'
     | '/inventario'
     | '/login'
+    | '/reporte-inspecciones'
     | '/reportes'
     | '/scan'
     | '/admin/bodega'
     | '/admin/categorias'
     | '/admin/configuracion'
+    | '/admin/cotizador'
+    | '/admin/empresas'
     | '/admin/equipos'
     | '/admin/inspecciones'
     | '/admin/inventario'
     | '/admin/plan-compras'
     | '/admin/productos'
+    | '/admin/reporte-inspecciones'
     | '/admin/reportes'
     | '/admin/usuarios'
     | '/admin/ventas'
@@ -295,16 +340,20 @@ export interface FileRouteTypes {
     | '/inspecciones'
     | '/inventario'
     | '/login'
+    | '/reporte-inspecciones'
     | '/reportes'
     | '/scan'
     | '/admin/bodega'
     | '/admin/categorias'
     | '/admin/configuracion'
+    | '/admin/cotizador'
+    | '/admin/empresas'
     | '/admin/equipos'
     | '/admin/inspecciones'
     | '/admin/inventario'
     | '/admin/plan-compras'
     | '/admin/productos'
+    | '/admin/reporte-inspecciones'
     | '/admin/reportes'
     | '/admin/usuarios'
     | '/admin/ventas'
@@ -322,16 +371,20 @@ export interface RootRouteChildren {
   InspeccionesRoute: typeof InspeccionesRoute
   InventarioRoute: typeof InventarioRoute
   LoginRoute: typeof LoginRoute
+  ReporteInspeccionesRoute: typeof ReporteInspeccionesRoute
   ReportesRoute: typeof ReportesRoute
   ScanRoute: typeof ScanRoute
   AdminBodegaRoute: typeof AdminBodegaRoute
   AdminCategoriasRoute: typeof AdminCategoriasRoute
   AdminConfiguracionRoute: typeof AdminConfiguracionRoute
+  AdminCotizadorRoute: typeof AdminCotizadorRoute
+  AdminEmpresasRoute: typeof AdminEmpresasRoute
   AdminEquiposRoute: typeof AdminEquiposRoute
   AdminInspeccionesRoute: typeof AdminInspeccionesRoute
   AdminInventarioRoute: typeof AdminInventarioRoute
   AdminPlanComprasRoute: typeof AdminPlanComprasRoute
   AdminProductosRoute: typeof AdminProductosRoute
+  AdminReporteInspeccionesRoute: typeof AdminReporteInspeccionesRoute
   AdminReportesRoute: typeof AdminReportesRoute
   AdminUsuariosRoute: typeof AdminUsuariosRoute
   AdminVentasRoute: typeof AdminVentasRoute
@@ -380,6 +433,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/reporte-inspecciones': {
+      id: '/reporte-inspecciones'
+      path: '/reporte-inspecciones'
+      fullPath: '/reporte-inspecciones'
+      preLoaderRoute: typeof ReporteInspeccionesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/reportes': {
       id: '/reportes'
       path: '/reportes'
@@ -422,6 +482,20 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AdminConfiguracionRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin/cotizador': {
+      id: '/admin/cotizador'
+      path: '/admin/cotizador'
+      fullPath: '/admin/cotizador'
+      preLoaderRoute: typeof AdminCotizadorRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/empresas': {
+      id: '/admin/empresas'
+      path: '/admin/empresas'
+      fullPath: '/admin/empresas'
+      preLoaderRoute: typeof AdminEmpresasRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/admin/equipos': {
       id: '/admin/equipos'
       path: '/admin/equipos'
@@ -455,6 +529,13 @@ declare module '@tanstack/react-router' {
       path: '/admin/productos'
       fullPath: '/admin/productos'
       preLoaderRoute: typeof AdminProductosRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/reporte-inspecciones': {
+      id: '/admin/reporte-inspecciones'
+      path: '/admin/reporte-inspecciones'
+      fullPath: '/admin/reporte-inspecciones'
+      preLoaderRoute: typeof AdminReporteInspeccionesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin/reportes': {
@@ -522,16 +603,20 @@ const rootRouteChildren: RootRouteChildren = {
   InspeccionesRoute: InspeccionesRoute,
   InventarioRoute: InventarioRoute,
   LoginRoute: LoginRoute,
+  ReporteInspeccionesRoute: ReporteInspeccionesRoute,
   ReportesRoute: ReportesRoute,
   ScanRoute: ScanRoute,
   AdminBodegaRoute: AdminBodegaRoute,
   AdminCategoriasRoute: AdminCategoriasRoute,
   AdminConfiguracionRoute: AdminConfiguracionRoute,
+  AdminCotizadorRoute: AdminCotizadorRoute,
+  AdminEmpresasRoute: AdminEmpresasRoute,
   AdminEquiposRoute: AdminEquiposRoute,
   AdminInspeccionesRoute: AdminInspeccionesRoute,
   AdminInventarioRoute: AdminInventarioRoute,
   AdminPlanComprasRoute: AdminPlanComprasRoute,
   AdminProductosRoute: AdminProductosRoute,
+  AdminReporteInspeccionesRoute: AdminReporteInspeccionesRoute,
   AdminReportesRoute: AdminReportesRoute,
   AdminUsuariosRoute: AdminUsuariosRoute,
   AdminVentasRoute: AdminVentasRoute,

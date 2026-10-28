@@ -19,15 +19,18 @@ const nav = [
 
 type AppRoute = (typeof nav)[number]["to"];
 
-function NavLinks({ onNavigate, isMagna }: { onNavigate?: () => void; isMagna: boolean }) {
+function NavLinks({ onNavigate, user }: { onNavigate?: () => void; user: ReturnType<typeof useAuth>["user"] }) {
+  const isMagna = user?.role === "magna" || user?.role === "administrador";
+  const permissions = user?.permissions ?? [];
+  const permissionByPath: Record<string,string> = { "/equipos":"equipment", "/inspecciones":"inspections", "/reportes":"reports", "/scan":"scanner", "/cotizaciones":"quotes", "/inventario":"inventory", "/productos":"products", "/categorias":"categories" };
   return <nav aria-label="Navegación principal" className="space-y-1">
-    {nav.filter((item) => item.to !== "/reportes" || isMagna).map((item) => <Link key={item.to} to={item.to} onClick={onNavigate} activeOptions={{ exact: "exact" in item ? item.exact : false }} activeProps={{ className: "bg-primary text-primary-foreground shadow-sm" }} inactiveProps={{ className: "text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground" }} className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors">
+    {nav.filter((item) => item.to === "/" || isMagna || permissions.includes(permissionByPath[item.to] ?? "")).map((item) => <Link key={item.to} to={item.to} onClick={onNavigate} activeOptions={{ exact: "exact" in item ? item.exact : false }} activeProps={{ className: "bg-primary text-primary-foreground shadow-sm" }} inactiveProps={{ className: "text-sidebar-foreground/75 hover:bg-sidebar-accent hover:text-sidebar-foreground" }} className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold transition-colors">
       <item.icon className="h-[18px] w-[18px] shrink-0" aria-hidden="true" />{item.label}
     </Link>)}
-    {isMagna && <>
+    {(isMagna || permissions.includes("warehouse") || permissions.includes("purchases")) && <>
       <div className="my-3 border-t border-sidebar-border" />
-      <Link to="/admin/bodega" onClick={onNavigate} activeProps={{ className: "bg-primary text-primary-foreground" }} className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-sidebar-foreground/80 hover:bg-sidebar-accent"><Warehouse className="h-[18px] w-[18px]" />Bodega</Link>
-      <Link to="/admin/plan-compras" onClick={onNavigate} activeProps={{ className: "bg-primary text-primary-foreground" }} className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-sidebar-foreground/80 hover:bg-sidebar-accent"><ShoppingCart className="h-[18px] w-[18px]" />Planificador de compras <span className="ml-auto rounded-full bg-primary px-2 py-0.5 text-[10px] font-bold text-primary-foreground">Magna</span></Link>
+      {(isMagna || permissions.includes("warehouse")) && <Link to="/admin/bodega" onClick={onNavigate} activeProps={{ className: "bg-primary text-primary-foreground" }} className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-sidebar-foreground/80 hover:bg-sidebar-accent"><Warehouse className="h-[18px] w-[18px]" />Bodega</Link>}
+      {(isMagna || permissions.includes("purchases")) && <Link to="/admin/plan-compras" onClick={onNavigate} activeProps={{ className: "bg-primary text-primary-foreground" }} className="flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-semibold text-sidebar-foreground/80 hover:bg-sidebar-accent"><ShoppingCart className="h-[18px] w-[18px]" />Planificador de compras</Link>}
     </>}
   </nav>;
 }
@@ -49,7 +52,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <p className="mt-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-white/65">EPIControl · Gestión de EPI</p>
             </Link>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-5"><NavLinks isMagna={user?.role === "magna"} /></div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-5"><NavLinks user={user} /></div>
           <div className="border-t border-white/15 px-4 py-4">
             <div className="rounded-xl border border-white/10 bg-white/5 p-3"><p className="text-xs font-bold tracking-wide text-white/90">ALTURA · SEGURIDAD · CONFIANZA</p><div className="mt-3 h-1 w-12 rounded-full bg-primary" /><p className="mt-3 text-[11px] leading-5 text-white/65">Trabajamos por un mundo más seguro.</p></div>
             <button type="button" onClick={logout} className="mt-3 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-white/65 hover:bg-white/10 hover:text-white"><LogOut className="h-4 w-4" />Cerrar sesión</button>
@@ -65,7 +68,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-5">
                 <SheetHeader className="mb-5"><SheetTitle className="text-left text-white">EPIControl</SheetTitle></SheetHeader>
                 <img src="/vertical-safety-logo.png" alt="Vertical Safety" className="mb-5 w-full max-w-[210px] brightness-110" />
-                <NavLinks onNavigate={() => setMenuOpen(false)} isMagna={user?.role === "magna"} />
+                <NavLinks user={user} onNavigate={() => setMenuOpen(false)} />
                 <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-3"><p className="text-xs font-bold tracking-wide text-white/90">ALTURA · SEGURIDAD · CONFIANZA</p><div className="mt-3 h-1 w-12 rounded-full bg-primary" /><p className="mt-3 text-[11px] leading-5 text-white/65">Trabajamos por un mundo más seguro.</p></div>
               </div>
             </SheetContent></Sheet>
@@ -73,9 +76,9 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="hidden min-w-0 flex-1 md:block"><SearchTrigger onClick={() => setSearchOpen(true)} /></div>
             <div className="ml-auto flex items-center gap-2">
               <Link to="/scan" className="hidden h-10 w-10 place-items-center rounded-lg border border-border text-muted-foreground hover:bg-muted sm:grid" aria-label="Escanear equipo"><ScanLine className="h-5 w-5" /></Link>
-              {user?.role === "magna" && <Link to="/admin" className="hidden h-10 items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-3 text-sm font-semibold hover:bg-primary/10 md:inline-flex"><Settings className="h-4 w-4" />Administración</Link>}
+              {(user?.role === "magna" || user?.role === "administrador" || (user?.permissions ?? []).some(p => ["warehouse","purchases","users","settings","companies","sales","quotes"].includes(p))) && <Link to="/admin" className="hidden h-10 items-center gap-2 rounded-lg border border-primary/40 bg-primary/5 px-3 text-sm font-semibold hover:bg-primary/10 md:inline-flex"><Settings className="h-4 w-4" />Administración</Link>}
               <div className="hidden h-10 w-10 place-items-center rounded-full bg-sidebar text-xs font-bold text-sidebar-foreground sm:grid">{initials}</div>
-              <div className="hidden min-w-0 md:block"><p className="max-w-36 truncate text-sm font-bold">{user?.name ?? "Usuario"}</p><p className="text-[11px] text-muted-foreground">{user?.role === "magna" ? "Magna" : "Usuario"}</p></div>
+              <div className="hidden min-w-0 md:block"><p className="max-w-36 truncate text-sm font-bold">{user?.name ?? "Usuario"}</p><p className="text-[11px] text-muted-foreground">{user?.role === "magna" ? "Magna" : user?.role === "administrador" ? "Administrador" : user?.role ?? "Usuario"}</p></div>
               <button type="button" onClick={() => setSearchOpen(true)} className="grid h-10 w-10 place-items-center rounded-lg border border-border md:hidden" aria-label="Buscar"><Search className="h-5 w-5" /></button>
             </div>
           </div>

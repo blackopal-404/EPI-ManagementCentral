@@ -1,6 +1,6 @@
 import type { Handler, HandlerEvent, HandlerResponse } from '@netlify/functions';
 import { Pool } from 'pg';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID, scryptSync, timingSafeEqual } from 'node:crypto';
 
 const COOKIE_NAME = 'epi_session';
 const SESSION_DAYS = 7;
@@ -55,6 +55,17 @@ async function getSession(event: HandlerEvent): Promise<SessionUser | null> {
   const row = result.rows[0];
   return row ? { id: row.id, email: row.email, fullName: row.full_name, role: row.role, status: row.status } : null;
 }
+async function getConfiguredSessionDays(): Promise<number> {
+  try { const result=await db().query<{value:unknown}>('SELECT value FROM app_settings WHERE key=$1 LIMIT 1',['security.session_days']); const raw=result.rows[0]?.value; const parsed=Number(typeof raw==='string'?(()=>{try{return JSON.parse(raw)}catch{return raw}})():raw); return Number.isFinite(parsed)?Math.max(1,Math.min(30,Math.floor(parsed))):SESSION_DAYS; } catch { return SESSION_DAYS; }
+}
+
+async function userHasPermission(user: SessionUser, permission: string): Promise<boolean> {
+  if (admin(user)) return true;
+  const result=await db().query<{permissions:unknown}>('SELECT permissions FROM roles WHERE name=$1 LIMIT 1',[user.role]);
+  const raw=result.rows[0]?.permissions; const permissions=Array.isArray(raw)?raw:typeof raw==='string'?(()=>{try{return JSON.parse(raw)}catch{return []}})():[];
+  return permissions.includes(permission);
+}
+
 async function audit(userId: string | null, action: string, entity: string, entityId: string | null, details: unknown, event: HandlerEvent) {
   try { await db().query(`INSERT INTO audit_log (actor_user_id, actor_email, action, entity_type, entity_id, ip_address, user_agent, after_data) VALUES ($1, COALESCE((SELECT email FROM users WHERE id = $1), ''), $2, $3, $4, NULLIF($5, '')::inet, $6, $7::jsonb)`, [userId, action, entity, entityId, event.headers['x-nf-client-connection-ip'] ?? '', (event.headers['user-agent'] ?? '').slice(0, 500), JSON.stringify(details ?? {})]); }
   catch (error) { console.error('Audit log write failed', error); }
@@ -72,29 +83,35 @@ async function googleLogin(event: HandlerEvent): Promise<HandlerResponse> {
   if (claims.aud !== clientId || !claims.sub || !email || !(claims.email_verified === true || claims.email_verified === 'true')) return json(401, { error: 'No se pudo verificar la identidad de Google.' });
   const magnaEmails = (process.env.MAGNA_EMAILS ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
   const isMagna = magnaEmails.includes(email);
-  const roleName: AppRole = isMagna ? 'magna' : 'usuario';
-  const role = await db().query<{ id: string }>('SELECT id FROM roles WHERE name = $1 LIMIT 1', [roleName]);
-  if (!role.rows[0]) return json(500, { error: 'Falta el rol inicial en PostgreSQL. Ejecuta la migración de esquema.' });
-  const userResult = await db().query<{ id: string; status: string }>(
-    `INSERT INTO users (id, auth_provider, auth_subject, full_name, email, role_id, status, last_access_at)
-     VALUES (gen_random_uuid()::text, 'google', $1, $2, $3, $4, 'activo', now())
-     ON CONFLICT (auth_provider, auth_subject) DO UPDATE SET full_name = EXCLUDED.full_name, email = EXCLUDED.email, last_access_at = now(), updated_at = now()
-     RETURNING id, status`, [claims.sub, text(claims.name, 200) || email.split('@')[0], email, role.rows[0].id]);
-  const user = userResult.rows[0];
+  const existing = await db().query<{id:string;status:string;role_id:string;role:string;auth_provider:string;auth_subject:string|null}>('SELECT u.id,u.status,u.role_id,r.name AS role,u.auth_provider,u.auth_subject FROM users u JOIN roles r ON r.id=u.role_id WHERE lower(u.email)=lower($1) LIMIT 1',[email]);
+  let user: {id:string;status:string};
+  let roleName: AppRole;
+  if (existing.rows[0]) {
+    const row=existing.rows[0];
+    if(row.status!=='activo') return json(403,{error:'La cuenta está desactivada. Contacta al administrador.'});
+    roleName = isMagna ? 'magna' : (row.role === 'magna' ? 'usuario' : row.role as AppRole);
+    const role = await db().query<{id:string}>('SELECT id FROM roles WHERE name=$1 LIMIT 1',[roleName]);
+    if(!role.rows[0]) return json(500,{error:'Falta el rol inicial en PostgreSQL. Ejecuta la migración de esquema.'});
+    const linked=await db().query<{id:string;status:string}>(`UPDATE users SET auth_provider='google',auth_subject=$1,full_name=$2,role_id=$3,last_access_at=now(),updated_at=now() WHERE id=$4 RETURNING id,status`,[claims.sub,text(claims.name,200)||email.split('@')[0],role.rows[0].id,row.id]); user=linked.rows[0];
+  } else {
+    roleName = isMagna ? 'magna' : 'usuario';
+    const role = await db().query<{ id: string }>('SELECT id FROM roles WHERE name = $1 LIMIT 1', [roleName]);
+    if (!role.rows[0]) return json(500, { error: 'Falta el rol inicial en PostgreSQL. Ejecuta la migración de esquema.' });
+    const userResult = await db().query<{ id: string; status: string }>(`INSERT INTO users (id,auth_provider,auth_subject,full_name,email,role_id,status,last_access_at) VALUES (gen_random_uuid()::text,'google',$1,$2,$3,$4,'activo',now()) RETURNING id,status`,[claims.sub,text(claims.name,200)||email.split('@')[0],email,role.rows[0].id]); user=userResult.rows[0];
+  }
   if (!user || user.status !== 'activo') return json(403, { error: 'La cuenta está desactivada. Contacta al administrador.' });
-  // Role is derived server-side from the allowlist on every login; never trust a browser-supplied role.
-  await db().query('UPDATE users SET role_id = $1 WHERE id = $2', [role.rows[0].id, user.id]);
-  const rawToken = randomBytes(32).toString('base64url');
+  const sessionDays=await getConfiguredSessionDays(); const rawToken = randomBytes(32).toString('base64url');
   await db().query(`INSERT INTO sessions (id, user_id, token_hash, expires_at, ip_address, user_agent)
-    VALUES (gen_random_uuid()::text, $1, $2, now() + ($3 * interval '1 day'), NULLIF($4, '')::inet, $5)`, [user.id, hash(rawToken), SESSION_DAYS, event.headers['x-nf-client-connection-ip'] ?? '', (event.headers['user-agent'] ?? '').slice(0, 500)]);
+    VALUES (gen_random_uuid()::text, $1, $2, now() + ($3 * interval '1 day'), NULLIF($4, '')::inet, $5)`, [user.id, hash(rawToken), sessionDays, event.headers['x-nf-client-connection-ip'] ?? '', (event.headers['user-agent'] ?? '').slice(0, 500)]);
   await audit(user.id, 'login', 'session', null, { provider: 'google' }, event);
-  return json(200, { user: { id: user.id, email, name: text(claims.name, 200) || email.split('@')[0], picture: text(claims.picture, 1000), role: roleName } }, { 'set-cookie': cookie(rawToken, SESSION_DAYS * 86400) });
+  const permissionResult=await db().query<{permissions:unknown}>('SELECT permissions FROM roles WHERE name=$1 LIMIT 1',[roleName]); const permissions=Array.isArray(permissionResult.rows[0]?.permissions)?permissionResult.rows[0].permissions:[];
+  return json(200, { user: { id: user.id, email, name: text(claims.name, 200) || email.split('@')[0], picture: text(claims.picture, 1000), role: roleName, permissions } }, { 'set-cookie': cookie(rawToken, sessionDays * 86400) });
 }
 
 
 type ColumnInfo = { column_name: string; data_type: string; udt_name: string; is_nullable: string; column_default: string | null; is_identity: string };
 const columnCache = new Map<string, ColumnInfo[]>();
-const tableAllowlist = new Set(['products','categories','manufacturers','product_images','warehouse_products','equipment','equipment_history','inspections','users','roles','technical_documents','inventory_movements','sales','sale_lines','sale_payments','quotes','quote_lines','purchase_plans','purchase_plan_lines','app_settings']);
+const tableAllowlist = new Set(['products','categories','manufacturers','product_images','warehouse_products','equipment','equipment_history','inspections','users','roles','technical_documents','inventory_movements','sales','sale_lines','sale_payments','quotes','quote_lines','purchase_plans','purchase_plan_lines','app_settings','companies','equipment_company_assignments']);
 const aliases: Record<string, string[]> = {
   category_id: ['categoryId'], manufacturer_id: ['manufacturerId'], product_id: ['productId'], image_url: ['image','imageUrl'], features_json: ['features'], specifications_json: ['specifications'], standards_json: ['standards'], warnings_json: ['warnings'], materials_json: ['materials'],
   sort_order: ['order','sortOrder'], full_name: ['fullName','name'], last_access_at: ['lastAccess'], created_at: ['createdAt'], updated_at: ['updatedAt'],
@@ -317,6 +334,27 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
     return json(200, { data: result.rows.map(row => ({ ...row.record, images: row.images ?? [] })) });
   }
 
+  if (path === '/auth/password' && event.httpMethod === 'POST') {
+    if (!sameOrigin(event)) return json(403, { error: 'Origen no permitido.' });
+    const b = body(event); const login = text(b.username, 320).toLowerCase(); const password = text(b.password, 200);
+    if (!login || !password) return json(400, { error: 'Ingresa usuario/correo y contraseña.' });
+    const found = await db().query<{id:string; email:string; full_name:string; status:string; password_hash:string|null; role:string; permissions:unknown}>(
+      `SELECT u.id,u.email,u.full_name,u.status,u.password_hash,r.name AS role,r.permissions FROM users u JOIN roles r ON r.id=u.role_id WHERE lower(u.email)=$1 OR lower(COALESCE(to_jsonb(u)->>'username',''))=$1 LIMIT 1`, [login]);
+    const account = found.rows[0];
+    let valid = false;
+    if (account?.password_hash) {
+      const [scheme,salt,expected] = account.password_hash.split('$');
+      if (scheme === 'scrypt' && salt && expected) { try { const actual=scryptSync(password,salt,64).toString('hex'); valid=actual.length===expected.length && timingSafeEqual(Buffer.from(actual,'hex'),Buffer.from(expected,'hex')); } catch { valid=false; } }
+    }
+    const authorizedMagna=(process.env.MAGNA_EMAILS ?? '').split(',').map(x=>x.trim().toLowerCase()).includes((account?.email ?? '').toLowerCase());
+    if (!account || !valid || account.status !== 'activo' || (account.role === 'magna' && !authorizedMagna)) return json(401, { error: 'Usuario o contraseña incorrectos, o cuenta inactiva.' });
+    const sessionDays=await getConfiguredSessionDays(); const rawToken = randomBytes(32).toString('base64url');
+    await db().query(`INSERT INTO sessions (id,user_id,token_hash,expires_at,ip_address,user_agent) VALUES (gen_random_uuid()::text,$1,$2,now()+($3*interval '1 day'),NULLIF($4,'')::inet,$5)`, [account.id,hash(rawToken),sessionDays,event.headers['x-nf-client-connection-ip'] ?? '',(event.headers['user-agent'] ?? '').slice(0,500)]);
+    await db().query('UPDATE users SET last_access_at=now() WHERE id=$1',[account.id]);
+    await audit(account.id,'login','session',null,{provider:'password'},event);
+    const permissions=Array.isArray(account.permissions)?account.permissions:[]; return json(200,{user:{id:account.id,email:account.email,name:account.full_name,role:account.role,permissions}}, {'set-cookie':cookie(rawToken,sessionDays*86400)});
+  }
+
   if (path === '/auth/google' && event.httpMethod === 'POST') {
     try { return await googleLogin(event); } catch (error) { console.error('Google login failed', error); return json(500, { error: 'No se pudo completar el inicio de sesión.' }); }
   }
@@ -328,9 +366,24 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
   }
   let user: SessionUser | null;
   try { user = await getSession(event); } catch (error) { console.error('Session lookup failed', error); return json(503, { error: 'No se pudo validar la sesión.' }); }
-  if (path === '/auth/session' && event.httpMethod === 'GET') return user ? json(200, { user: { id: user.id, email: user.email, name: user.fullName, role: user.role } }) : json(401, { user: null });
+  if (path === '/auth/session' && event.httpMethod === 'GET') { if(!user) return json(401,{user:null}); const p=await db().query<{permissions:unknown}>('SELECT permissions FROM roles WHERE name=$1 LIMIT 1',[user.role]); const permissions=Array.isArray(p.rows[0]?.permissions)?p.rows[0].permissions:[]; return json(200,{user:{id:user.id,email:user.email,name:user.fullName,role:user.role,permissions}}); }
   if (!user) return json(401, { error: 'Inicia sesión para continuar.' });
   if (!sameOrigin(event)) return json(403, { error: 'Origen no permitido.' });
+  if (!admin(user)) {
+    const permissionByPath: Array<[RegExp,string]> = [
+      [/^\/(equipment|equipment\/.+)/,'equipment'], [/^\/inspections/,'inspections'], [/^\/documents/,'documents'], [/^\/equipment\/history/,'equipment'],
+      [/^\/products/,'products'], [/^\/categories/,'categories'], [/^\/warehouse-products/,'warehouse'], [/^\/sales/,'sales'], [/^\/quotes/,'quotes'], [/^\/purchase-plans/,'purchases'], [/^\/reports/,'reports'], [/^\/users/,'users'], [/^\/roles/,'users'], [/^\/companies/,'companies'], [/^\/company-assignments/,'companies'], [/^\/settings/,'settings']
+    ];
+    const required = permissionByPath.find(([pattern])=>pattern.test(path))?.[1];
+    if (required) {
+      const rolePermissions = await db().query<{permissions: unknown}>('SELECT permissions FROM roles WHERE name=$1 LIMIT 1',[user.role]);
+      const raw=rolePermissions.rows[0]?.permissions;
+      const permissions=Array.isArray(raw)?raw:typeof raw==='string'?(()=>{try{return JSON.parse(raw)}catch{return []}})():[];
+      const defaults:Record<string,string[]>={supervisor:['equipment','inspections','inspection_reports','scanner','products','warehouse','inventory','reports'],inspector:['equipment','inspections','inspection_reports','scanner','documents'],tecnico:['equipment','inspections','inspection_reports','scanner','documents'],usuario:['equipment','inspections','inspection_reports','scanner','documents']};
+      const allowed=permissions.length?permissions:defaults[user.role]??[];
+      if(!allowed.includes(required)) return json(403,{error:'Tu categoría de usuario no tiene acceso a este módulo.',requiredPermission:required});
+    }
+  }
 
   if (path === '/products' && event.httpMethod === 'POST') {
     if (!admin(user)) return json(403, { error: 'No tienes permiso para modificar el catálogo.' });
@@ -466,13 +519,63 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
     return json(200, { ok: true });
   }
 
+  if (path === '/users' && event.httpMethod === 'POST') {
+    if (!admin(user)) return json(403,{error:'Solo Magna o administración puede crear usuarios.'});
+    const b=body(event); const fullName=text(b.fullName,180); const email=text(b.email,320).toLowerCase(); const phone=text(b.phone,40); const identityNumber=text(b.identityNumber,80); const username=text(b.username,80).toLowerCase(); const password=text(b.password,200); const roleName=text(b.role,80) || 'usuario';
+    if(['magna','administrador'].includes(roleName) && user.role!=='magna') return json(403,{error:'Solo la cuenta Magna autorizada puede asignar un rol de acceso total.'});
+    if (!fullName || !email || !username || !phone || !identityNumber || !password || password.length<10) return json(400,{error:'Nombre, Gmail, usuario, celular, identidad y contraseña (mínimo 10 caracteres) son obligatorios.'});
+    const role=await db().query<{id:string}>('SELECT id FROM roles WHERE name=$1 LIMIT 1',[roleName]); if(!role.rows[0]) return json(400,{error:'Selecciona una categoría/rol existente.'});
+    const salt=randomBytes(16).toString('hex'); const passwordHash=`scrypt$${salt}$${scryptSync(password,salt,64).toString('hex')}`;
+    try {
+      const saved=await db().query(`INSERT INTO users (id,auth_provider,auth_subject,username,password_hash,full_name,email,phone,identity_number,role_id,status,created_at,updated_at) VALUES (gen_random_uuid()::text,'local',NULLIF($1,''),$2,$3,$4,$5,$6,$7,$8,'activo',now(),now()) RETURNING id,username,full_name,email,phone,identity_number,status,created_at`,[username,username,passwordHash,fullName,email,phone,identityNumber,role.rows[0].id]);
+      await audit(user.id,'create','user',saved.rows[0].id,{email,role:roleName},event); return json(201,{data:{...saved.rows[0],role:roleName}});
+    } catch(error) { if (String(error).includes('unique') || String(error).includes('duplicate')) return json(409,{error:'Ya existe un usuario con ese correo o nombre de usuario.'}); throw error; }
+  }
+  if (path === '/roles' && event.httpMethod === 'POST') {
+    if (!admin(user)) return json(403,{error:'No tienes permiso para crear categorías de usuario.'});
+    const b=body(event); const name=text(b.name,80).toLowerCase().replace(/[^a-z0-9_-]/g,'_'); const label=text(b.label,100); const description=text(b.description,500); const permissions=Array.isArray(b.permissions)?b.permissions.filter(x=>typeof x==='string').slice(0,100):[];
+    if(!name || !label) return json(400,{error:'Nombre y etiqueta son obligatorios.'});
+    const result=await db().query(`INSERT INTO roles (id,name,label,description,permissions,status,created_at,updated_at) VALUES (gen_random_uuid()::text,$1,$2,$3,$4::jsonb,'activo',now(),now()) RETURNING *`,[name,label,description,JSON.stringify(permissions)]);
+    await audit(user.id,'create','role',result.rows[0].id,{name,permissions},event); return json(201,{data:result.rows[0]});
+  }
+  if (path === '/roles' && event.httpMethod === 'PUT') {
+    if (!admin(user)) return json(403,{error:'No tienes permiso para modificar categorías de usuario.'});
+    const b=body(event); const id=text(b.id,100); const label=text(b.label,100); const description=text(b.description,500); const permissions=Array.isArray(b.permissions)?b.permissions.filter(x=>typeof x==='string').slice(0,100):[];
+    if(!id || !label) return json(400,{error:'Identificador y nombre de categoría son obligatorios.'});
+    const result=await db().query(`UPDATE roles SET label=$2,description=$3,permissions=$4::jsonb,updated_at=now() WHERE id=$1 RETURNING *`,[id,label,description,JSON.stringify(permissions)]);
+    if(!result.rows[0]) return json(404,{error:'Categoría no encontrada.'}); return json(200,{data:result.rows[0]});
+  }
+
+  if (path === '/companies' && event.httpMethod === 'GET') {
+    const result=await db().query(`SELECT c.*,COALESCE(jsonb_agg(jsonb_build_object('equipmentId',a.equipment_id,'internalCode',e.internal_code,'serialNumber',e.serial_number,'productId',e.product_id,'status',e.status)) FILTER (WHERE a.id IS NOT NULL),'[]'::jsonb) AS equipment FROM companies c LEFT JOIN equipment_company_assignments a ON a.company_id=c.id AND a.status='activa' LEFT JOIN equipment e ON e.id=a.equipment_id GROUP BY c.id ORDER BY c.name`);
+    return json(200,{data:result.rows});
+  }
+  if (path === '/companies' && event.httpMethod === 'POST') {
+    if(!admin(user) && !(await userHasPermission(user,'companies'))) return json(403,{error:'No tienes permiso para crear empresas.'}); const b=body(event); const rtn=text(b.rtn,30); const name=text(b.name,180); const contact=text(b.contactName,180); const phone=text(b.phone,50); const email=text(b.email,320).toLowerCase();
+    if(!rtn || !name || !contact || !phone) return json(400,{error:'RTN, nombre, persona de contacto y teléfono son obligatorios.'});
+    try { const result=await db().query(`INSERT INTO companies (id,rtn,name,contact_name,phone,email,address,status,notes,created_by,created_at,updated_at) VALUES (gen_random_uuid()::text,$1,$2,$3,$4,$5,$6,'activa',$7,$8,now(),now()) RETURNING *`,[rtn,name,contact,phone,email,text(b.address,300),text(b.notes,1000),user.id]); await audit(user.id,'create','company',result.rows[0].id,{rtn,name},event); return json(201,{data:result.rows[0]}); }
+    catch(error){if(String(error).includes('unique')||String(error).includes('duplicate')) return json(409,{error:'Ya existe una empresa con ese RTN.'});throw error;}
+  }
+  if (path === '/company-assignments' && event.httpMethod === 'POST') {
+    if(!admin(user) && !(await userHasPermission(user,'companies'))) return json(403,{error:'No tienes permiso para asignar equipos a empresas.'}); const b=body(event); const companyId=text(b.companyId,100); const equipmentIds=Array.isArray(b.equipmentIds)?b.equipmentIds.map(x=>text(x,100)).filter(Boolean):[];
+    if(!companyId || !equipmentIds.length) return json(400,{error:'Selecciona una empresa y al menos un equipo.'});
+    const client=await db().connect(); try { await client.query('BEGIN'); for(const equipmentId of equipmentIds){ await client.query(`UPDATE equipment_company_assignments SET status='finalizada',returned_at=now() WHERE equipment_id=$1 AND status='activa'`,[equipmentId]); await client.query(`INSERT INTO equipment_company_assignments (id,company_id,equipment_id,assigned_by,status,assigned_at) VALUES (gen_random_uuid()::text,$1,$2,$3,'activa',now())`,[companyId,equipmentId,user.id]); await client.query(`UPDATE equipment SET status='asignado',updated_at=now() WHERE id=$1`,[equipmentId]); } await client.query('COMMIT'); } catch(error){await client.query('ROLLBACK');throw error;} finally{client.release();} return json(200,{ok:true,assigned:equipmentIds.length});
+  }
+  if (path === '/settings' && event.httpMethod === 'GET') {
+    const result=await db().query(`SELECT key,value FROM app_settings ORDER BY key`); const settings=Object.fromEntries(result.rows.map(r=>[r.key,r.value])); return json(200,{data:settings});
+  }
+  if (path === '/settings' && event.httpMethod === 'PUT') {
+    if(!admin(user) && !(await userHasPermission(user,'settings'))) return json(403,{error:'No tienes permiso para modificar la configuración.'}); const b=body(event); const settings=b.settings && typeof b.settings==='object'?b.settings as Record<string,unknown>:{};
+    const client=await db().connect(); try{await client.query('BEGIN'); for(const [key,value] of Object.entries(settings)){if(!/^[a-z0-9_.-]{2,80}$/i.test(key)) continue; await dynamicWrite(client,'app_settings',{key,value,valueJson:value,settingValue:value,jsonValue:value,updatedBy:user.id,updatedAt:new Date()},'key');} await client.query('COMMIT');}catch(error){await client.query('ROLLBACK');throw error;}finally{client.release();} await audit(user.id,'update','app_settings',null,{keys:Object.keys(settings)},event); return json(200,{data:settings});
+  }
+
   if (path === '/roles' && event.httpMethod === 'GET') {
     const result = await rowsAsJson('roles', db(), '', [], "ORDER BY to_jsonb(t)->>'name'");
     return json(200, { data: result });
   }
   if (path === '/users' && event.httpMethod === 'GET') {
     const result = admin(user)
-      ? await db().query<{ record: Record<string, unknown> }>(`SELECT to_jsonb(u) || jsonb_build_object('role', r.name) AS record FROM users u LEFT JOIN roles r ON r.id=u.role_id ORDER BY u.full_name LIMIT 1000`)
+      ? await db().query<{ record: Record<string, unknown> }>(`SELECT (to_jsonb(u) - 'password_hash' - 'auth_subject') || jsonb_build_object('role', r.name) AS record FROM users u LEFT JOIN roles r ON r.id=u.role_id ORDER BY u.full_name LIMIT 1000`)
       : await db().query<{ record: Record<string, unknown> }>(`SELECT jsonb_build_object('id',u.id,'full_name',u.full_name,'role',r.name,'status',u.status,'created_at',u.created_at,'last_access_at',u.last_access_at) AS record FROM users u LEFT JOIN roles r ON r.id=u.role_id ORDER BY u.full_name LIMIT 1000`);
     return json(200, { data: result.rows.map(row => row.record) });
   }

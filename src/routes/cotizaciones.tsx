@@ -8,7 +8,7 @@ import type { QuoteCompanyProfile, QuoteCustomer, WarehouseProduct } from "@/typ
 export const Route = createFileRoute("/cotizaciones")({ component: QuotesPage });
 const money = new Intl.NumberFormat("es-HN", { style: "currency", currency: "USD" });
 
-function QuotesPage(){
+export function QuotesPage(){
  const {data:products=[]}=useQuery({queryKey:["warehouse-for-quotes"],queryFn:warehouseService.getProducts});
  const [items,setItems]=useState<Record<string,number>>({}); const [profile,setProfile]=useState<QuoteCompanyProfile>({name:"Vertical Safety",address:"",phone:"",email:"",logoDataUrl:"/vertical-safety-logo.png"});
  const [customer,setCustomer]=useState<QuoteCustomer>({companyName:"",contactName:"",place:"",date:new Date().toISOString().slice(0,10),notes:""});

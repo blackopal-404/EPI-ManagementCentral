@@ -143,15 +143,28 @@ function RootComponent() {
 function AuthenticatedApp() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isAdmin = pathname.startsWith("/admin");
-  const isReports = pathname === "/reportes";
+  const adminOnlyPaths = ["/reportes", "/cotizaciones", "/inventario", "/productos", "/categorias"];
+  const isAdminOnly = isAdmin || adminOnlyPaths.some((path) => pathname === path || pathname.startsWith(`${path}/`));
   const { user, ready } = useAuth();
 
   if (pathname === "/login") return <Outlet />;
   if (!ready) return <div className="grid min-h-screen place-items-center bg-background text-sm text-muted-foreground">Cargando sesión…</div>;
   if (!user) return <Navigate to="/login" replace />;
-  // Todo el espacio /admin es exclusivo de Magna. La autorización de producción
-  // también debe validarse en el backend cuando se conecte la API.
-  if ((isAdmin || isReports) && user.role !== "magna") return <Navigate to="/" replace />;
+  // Magna y administración pueden entrar a todo. Los demás usuarios solo acceden a rutas
+  // habilitadas en los permisos de su categoría; el backend vuelve a validar cada operación.
+  const fullAccess = user.role === "magna" || user.role === "administrador";
+  const routePermission: Record<string,string> = {
+    "/admin/ventas":"sales", "/admin/bodega":"warehouse", "/admin/plan-compras":"purchases",
+    "/admin/usuarios":"users", "/admin/configuracion":"settings", "/admin/reportes":"reports",
+    "/admin/cotizador":"quotes", "/admin/inventario":"inventory", "/admin/productos":"products",
+    "/admin/categorias":"categories", "/admin/empresas":"companies", "/admin/equipos":"equipment",
+    "/admin/inspecciones":"inspections", "/admin/reporte-inspecciones":"inspection_reports",
+    "/reportes":"reports", "/cotizaciones":"quotes", "/inventario":"inventory", "/productos":"products", "/categorias":"categories",
+  };
+  const requiredPermission = routePermission[pathname] ?? (pathname === "/admin" || pathname === "/admin/" ? "dashboard" : undefined);
+  const hasDashboardAccess = (user.permissions ?? []).some(permission => permission !== "scanner");
+  const hasRouteAccess = fullAccess || (!!requiredPermission && (user.permissions ?? []).includes(requiredPermission)) || (requiredPermission === "dashboard" && hasDashboardAccess);
+  if (isAdminOnly && !hasRouteAccess) return <Navigate to="/" replace />;
 
   return (
     <>

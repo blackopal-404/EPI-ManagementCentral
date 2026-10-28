@@ -1,0 +1,24 @@
+import { useQuery } from "@tanstack/react-query";
+import { ClipboardCheck, Printer } from "lucide-react";
+import { inspectionService, equipmentService, productService, userService } from "@/services";
+import { InspectionResultBadge } from "@/components/common/StatusBadge";
+
+export function InspectionPrintReport() {
+  const { data: inspections = [], isLoading, error } = useQuery({ queryKey: ["inspections"], queryFn: () => inspectionService.getInspections() });
+  const { data: equipment = [] } = useQuery({ queryKey: ["equipment"], queryFn: () => equipmentService.getEquipment() });
+  const { data: products = [] } = useQuery({ queryKey: ["products"], queryFn: () => productService.getProducts() });
+  const { data: users = [] } = useQuery({ queryKey: ["users"], queryFn: () => userService.getUsers() });
+
+  return <div className="mx-auto max-w-5xl space-y-5">
+    <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between print:hidden">
+      <div><p className="label-caps">Gestión del equipo</p><h1 className="mt-1 font-display text-2xl font-extrabold">Reporte de inspecciones</h1><p className="mt-1 text-sm text-muted-foreground">Vista exclusiva de registros de inspección. Usa imprimir para guardar el reporte como PDF.</p></div>
+      <button type="button" onClick={() => window.print()} disabled={isLoading || !!error || inspections.length === 0} className="inline-flex items-center justify-center gap-2 rounded-md bg-primary px-4 py-2.5 text-sm font-bold text-primary-foreground disabled:opacity-50"><Printer className="h-4 w-4"/>Imprimir / Guardar PDF</button>
+    </header>
+    <section className="panel overflow-hidden print:border-0 print:shadow-none">
+      <div className="border-b border-border p-4 print:border-black"><div className="flex items-center gap-3"><ClipboardCheck className="h-6 w-6 text-primary print:text-black"/><div><h2 className="font-display text-lg font-extrabold">Vertical Safety · Reporte de inspecciones</h2><p className="text-xs text-muted-foreground print:text-black">Generado: {new Date().toLocaleString("es-HN")}</p></div></div></div>
+      {isLoading ? <p className="p-6 text-sm text-muted-foreground">Cargando inspecciones…</p> : error ? <p className="p-6 text-sm text-destructive">No se pudieron cargar las inspecciones. Intenta de nuevo antes de imprimir.</p> : inspections.length === 0 ? <p className="p-6 text-sm text-muted-foreground">No hay registros de inspección para incluir en el reporte.</p> : <div className="overflow-x-auto"><table className="w-full min-w-[760px] text-left text-sm print:min-w-0"><thead className="bg-muted/50 text-xs uppercase text-muted-foreground print:bg-white print:text-black"><tr>{["Fecha","Equipo / código","Producto","Inspector","Resultado","Observaciones","Próxima inspección"].map(label=><th key={label} className="px-3 py-3 print:border-b print:border-black print:px-2 print:py-2">{label}</th>)}</tr></thead><tbody className="divide-y divide-border print:divide-black">{[...inspections].sort((a,b)=>b.date.localeCompare(a.date)).map(item=>{const unit=equipment.find(x=>x.id===item.equipmentId);const product=unit&&products.find(x=>x.id===unit.productId);const inspector=users.find(x=>x.id===item.inspectorId);return <tr key={item.id} className="align-top"><td className="whitespace-nowrap px-3 py-3 print:px-2 print:py-2">{item.date||"—"}</td><td className="px-3 py-3 print:px-2 print:py-2"><span className="font-semibold">{unit?.internalCode||item.equipmentId}</span>{unit?.serialNumber&&<p className="text-xs text-muted-foreground print:text-black">S/N: {unit.serialNumber}</p>}</td><td className="px-3 py-3 print:px-2 print:py-2">{product?.name||"—"}</td><td className="px-3 py-3 print:px-2 print:py-2">{inspector?.fullName||"—"}</td><td className="px-3 py-3 print:px-2 print:py-2"><span className="print:hidden"><InspectionResultBadge result={item.result}/></span><span className="hidden print:inline">{item.result}</span></td><td className="max-w-xs whitespace-pre-wrap px-3 py-3 print:px-2 print:py-2">{item.observations||"—"}{item.recommendations&&<p className="mt-1 text-xs text-muted-foreground print:text-black">Recomendación: {item.recommendations}</p>}</td><td className="whitespace-nowrap px-3 py-3 print:px-2 print:py-2">{item.nextInspectionDate||"—"}</td></tr>})}</tbody></table></div>}
+      <div className="border-t border-border px-4 py-3 text-xs text-muted-foreground print:border-black print:text-black">Total de registros: {inspections.length}</div>
+    </section>
+    <style>{`@media print { @page { size: landscape; margin: 12mm; } body { background: white !important; color: black !important; } body * { visibility: hidden; } .print\:border-0, .print\:border-0 * { visibility: visible; } #contenido { max-width: none !important; padding: 0 !important; } }`}</style>
+  </div>;
+}
