@@ -1,4 +1,5 @@
 import { useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowLeft, Boxes, ClipboardCheck, FileBarChart, LayoutDashboard, Menu,
@@ -78,12 +79,12 @@ export function AdminShell({ children }: { children: ReactNode }) {
         </div>
       </aside>
 
-      {open && <><button type="button" aria-label="Cerrar menú" onClick={closeMenu} className="fixed inset-0 z-[110] bg-black/60 lg:hidden" /><aside id="admin-mobile-drawer" role="dialog" aria-modal="true" aria-label="Menú de administración" className="fixed inset-y-0 left-0 z-[120] flex h-dvh w-[86vw] max-w-xs flex-col overflow-hidden border-r-4 border-primary/70 bg-sidebar px-3 py-4 text-sidebar-foreground shadow-2xl lg:hidden">
+      {open && typeof document !== "undefined" ? createPortal(<><button type="button" aria-label="Cerrar menú" onClick={closeMenu} className="fixed inset-0 bg-black/60 lg:hidden" style={{ zIndex: 9998 }} /><aside id="admin-mobile-drawer" role="dialog" aria-modal="true" aria-label="Menú de administración" style={{ zIndex: 9999 }} className="fixed inset-y-0 left-0 flex h-dvh w-[86vw] max-w-xs flex-col overflow-hidden border-r-4 border-primary/70 bg-sidebar px-3 py-4 text-sidebar-foreground shadow-2xl lg:hidden">
         <div className="mb-4 flex items-center justify-between border-b border-sidebar-border px-2 pb-4"><div className="flex items-center gap-2"><ShieldCheck className="h-5 w-5 text-primary"/><span className="font-display text-sm font-extrabold">{user?.role === "magna" ? "Administración · Magna" : "Menú del sistema"}</span></div><button type="button" onClick={closeMenu} aria-label="Cerrar menú" className="grid h-9 w-9 place-items-center rounded-md hover:bg-sidebar-accent"><X className="h-5 w-5"/></button></div>
         <div className="min-h-0 flex-1 overflow-y-auto pr-1"><NavList user={user} onNavigate={closeMenu}/></div>
         <Link to="/" onClick={closeMenu} className="mt-3 flex shrink-0 items-center gap-2 rounded-lg border border-sidebar-border px-3 py-2.5 text-sm font-semibold"><ArrowLeft className="h-4 w-4"/>Volver a la aplicación</Link>
         <button type="button" onClick={logout} className="mt-2 flex shrink-0 items-center gap-2 rounded-lg px-3 py-2 text-xs font-semibold text-sidebar-foreground/70 hover:bg-sidebar-accent"><LogOut className="h-4 w-4"/>Cerrar sesión</button>
-      </aside></>}
+      </aside></>, document.body) : null}
 
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 border-b-2 border-primary/55 bg-card/95 shadow-sm backdrop-blur">

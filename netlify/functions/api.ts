@@ -72,10 +72,15 @@ async function audit(userId: string | null, action: string, entity: string, enti
 }
 
 async function googleLogin(event: HandlerEvent): Promise<HandlerResponse> {
+  let authStage = 'start';
+  try {
+  authStage = 'origin-check';
   if (!sameOrigin(event)) return json(403, { error: 'Origen no permitido.' });
+  authStage = 'read-google-credential';
   const credential = text(body(event).credential, 10_000);
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!credential || !clientId) return json(400, { error: 'Falta la credencial de Google o la configuración del servidor.' });
+  authStage = 'verify-google-token';
   const verify = await fetch(`https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(credential)}`, { signal: AbortSignal.timeout(8000) });
   if (!verify.ok) return json(401, { error: 'La credencial de Google no es válida.' });
   const claims = await verify.json() as { aud?: string; sub?: string; email?: string; email_verified?: boolean | string; name?: string; picture?: string; exp?: string };
@@ -83,6 +88,7 @@ async function googleLogin(event: HandlerEvent): Promise<HandlerResponse> {
   if (claims.aud !== clientId || !claims.sub || !email || !(claims.email_verified === true || claims.email_verified === 'true')) return json(401, { error: 'No se pudo verificar la identidad de Google.' });
   const magnaEmails = (process.env.MAGNA_EMAILS ?? '').split(',').map((x) => x.trim().toLowerCase()).filter(Boolean);
   const isMagna = magnaEmails.includes(email);
+  authStage = 'lookup-user-and-role';
   const existing = await db().query<{id:string;status:string;role_id:string;role:string;auth_provider:string;auth_subject:string|null}>('SELECT u.id,u.status,u.role_id,r.name AS role,u.auth_provider,u.auth_subject FROM users u JOIN roles r ON r.id=u.role_id WHERE lower(u.email)=lower($1) LIMIT 1',[email]);
   let user: {id:string;status:string};
   let roleName: AppRole;
@@ -90,22 +96,35 @@ async function googleLogin(event: HandlerEvent): Promise<HandlerResponse> {
     const row=existing.rows[0];
     if(row.status!=='activo') return json(403,{error:'La cuenta está desactivada. Contacta al administrador.'});
     roleName = isMagna ? 'magna' : (row.role === 'magna' ? 'usuario' : row.role as AppRole);
+    authStage = 'resolve-existing-user-role';
     const role = await db().query<{id:string}>('SELECT id FROM roles WHERE name=$1 LIMIT 1',[roleName]);
     if(!role.rows[0]) return json(500,{error:'Falta el rol inicial en PostgreSQL. Ejecuta la migración de esquema.'});
+    authStage = 'link-existing-google-user';
     const linked=await db().query<{id:string;status:string}>(`UPDATE users SET auth_provider='google',auth_subject=$1,full_name=$2,role_id=$3,last_access_at=now(),updated_at=now() WHERE id=$4 RETURNING id,status`,[claims.sub,text(claims.name,200)||email.split('@')[0],role.rows[0].id,row.id]); user=linked.rows[0];
   } else {
     roleName = isMagna ? 'magna' : 'usuario';
+    authStage = 'resolve-new-user-role';
     const role = await db().query<{ id: string }>('SELECT id FROM roles WHERE name = $1 LIMIT 1', [roleName]);
     if (!role.rows[0]) return json(500, { error: 'Falta el rol inicial en PostgreSQL. Ejecuta la migración de esquema.' });
+    authStage = 'create-google-user';
     const userResult = await db().query<{ id: string; status: string }>(`INSERT INTO users (id,auth_provider,auth_subject,full_name,email,role_id,status,last_access_at) VALUES (gen_random_uuid()::text,'google',$1,$2,$3,$4,'activo',now()) RETURNING id,status`,[claims.sub,text(claims.name,200)||email.split('@')[0],email,role.rows[0].id]); user=userResult.rows[0];
   }
   if (!user || user.status !== 'activo') return json(403, { error: 'La cuenta está desactivada. Contacta al administrador.' });
+  authStage = 'create-session';
   const sessionDays=await getConfiguredSessionDays(); const rawToken = randomBytes(32).toString('base64url');
   await db().query(`INSERT INTO sessions (id, user_id, token_hash, expires_at, ip_address, user_agent)
     VALUES (gen_random_uuid()::text, $1, $2, now() + ($3 * interval '1 day'), NULLIF($4, '')::inet, $5)`, [user.id, hash(rawToken), sessionDays, event.headers['x-nf-client-connection-ip'] ?? '', (event.headers['user-agent'] ?? '').slice(0, 500)]);
+  authStage = 'write-audit-log';
   await audit(user.id, 'login', 'session', null, { provider: 'google' }, event);
+  authStage = 'load-permissions';
   const permissionResult=await db().query<{permissions:unknown}>('SELECT permissions FROM roles WHERE name=$1 LIMIT 1',[roleName]); const permissions=Array.isArray(permissionResult.rows[0]?.permissions)?permissionResult.rows[0].permissions:[];
   return json(200, { user: { id: user.id, email, name: text(claims.name, 200) || email.split('@')[0], picture: text(claims.picture, 1000), role: roleName, permissions } }, { 'set-cookie': cookie(rawToken, sessionDays * 86400) });
+
+  } catch (error) {
+    const safeError = error instanceof Error ? { name: error.name, message: error.message, code: (error as Error & { code?: string }).code } : { message: 'Unknown error' };
+    console.error(`[auth/google] failed at stage=${authStage}`, safeError);
+    throw error;
+  }
 }
 
 
@@ -365,7 +384,7 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
     return json(200, { ok: true }, { 'set-cookie': cookie('', 0) });
   }
   let user: SessionUser | null;
-  try { user = await getSession(event); } catch (error) { console.error('Session lookup failed', error); return json(503, { error: 'No se pudo validar la sesión.' }); }
+  try { user = await getSession(event); } catch (error) { console.error('[auth/session] lookup failed', error instanceof Error ? { name: error.name, message: error.message, code: (error as Error & { code?: string }).code } : { message: 'Unknown error' }); return json(503, { error: 'No se pudo validar la sesión.' }); }
   if (path === '/auth/session' && event.httpMethod === 'GET') { if(!user) return json(401,{user:null}); const p=await db().query<{permissions:unknown}>('SELECT permissions FROM roles WHERE name=$1 LIMIT 1',[user.role]); const permissions=Array.isArray(p.rows[0]?.permissions)?p.rows[0].permissions:[]; return json(200,{user:{id:user.id,email:user.email,name:user.fullName,role:user.role,permissions}}); }
   if (!user) return json(401, { error: 'Inicia sesión para continuar.' });
   if (!sameOrigin(event)) return json(403, { error: 'Origen no permitido.' });
