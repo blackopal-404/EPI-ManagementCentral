@@ -1,0 +1,1 @@
+module.exports = require('./Users/lagos/OneDrive/Documentos/EPI-ManagementCentral/netlify/functions/api.js')

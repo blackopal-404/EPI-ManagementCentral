@@ -109,7 +109,7 @@ async function googleLogin(event: HandlerEvent): Promise<HandlerResponse> {
 }
 
 
-type ColumnInfo = { column_name: string; data_type: string; udt_name: string; is_nullable: string; column_default: string | null; is_identity: string };
+type ColumnInfo = { column_name: string; data_type: string; udt_name: string; is_nullable: string; column_default: string | null; is_identity: string; is_generated: string };
 const columnCache = new Map<string, ColumnInfo[]>();
 const tableAllowlist = new Set(['products','categories','manufacturers','product_images','warehouse_products','equipment','equipment_history','inspections','users','roles','technical_documents','inventory_movements','sales','sale_lines','sale_payments','quotes','quote_lines','purchase_plans','purchase_plan_lines','app_settings','companies','equipment_company_assignments']);
 const aliases: Record<string, string[]> = {
@@ -133,7 +133,7 @@ async function tableColumns(table: string, executor: Pick<Pool, 'query'> | { que
   if (!tableAllowlist.has(table)) throw new Error('Tabla no permitida.');
   const cached = columnCache.get(table);
   if (cached) return cached;
-  const result = await executor.query<ColumnInfo>(`SELECT column_name, data_type, udt_name, is_nullable, column_default, is_identity FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 ORDER BY ordinal_position`, [table]);
+  const result = await executor.query<ColumnInfo>(`SELECT column_name, data_type, udt_name, is_nullable, column_default, is_identity, is_generated FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 ORDER BY ordinal_position`, [table]);
   if (!result.rows.length) throw new Error(`No existe la tabla ${table} en PostgreSQL.`);
   columnCache.set(table, result.rows);
   return result.rows;
@@ -187,7 +187,7 @@ async function dynamicWrite(executor: { query: Pool['query'] }, table: string, i
   const names: string[] = [];
   const explicitlyProvided = new Set<string>();
   for (const column of columns) {
-    if (column.is_identity === 'YES' || column.column_default?.startsWith('nextval(')) continue;
+    if (column.is_identity === 'YES' || column.is_generated === 'ALWAYS' || column.column_default?.startsWith('nextval(')) continue;
     const picked = valueForColumn(column, input);
     if (picked.found) {
       const choices = await enumValues(column, executor);
@@ -641,9 +641,9 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
         const product = found.rows[0]; if (!product) throw new Error('Uno de los productos de la cotización no está disponible.');
         const unitPrice = Number(item.unitPrice ?? product['sale_price']); if (!Number.isFinite(unitPrice) || unitPrice < 0) throw new Error('Precio inválido en la cotización.');
         const lineTotal = Number((quantity*unitPrice).toFixed(2)); subtotal += lineTotal;
-        lines.push({ id:randomUUID(), quoteId, warehouseProductId:productId, quantity, unitPrice, lineTotal, sku:product['sku'], name:product['name'] });
+        lines.push({ id:randomUUID(), quoteId, warehouseProductId:productId, quantity, unitPrice, skuSnapshot:product['sku'], nameSnapshot:product['name'] });
       }
-      const quote = await dynamicWrite(client,'quotes',{ id:quoteId, quoteNumber, companyName:text(customer['companyName'],180), customerName:text(customer['companyName'],180), contactName:text(customer['contactName'],180), customerContact:text(customer['contactName'],180), place:text(customer['place'],180), date:text(customer['date'],10) || now.toISOString().slice(0,10), notes:text(customer['notes'],2000), subtotal, total:Number(subtotal.toFixed(2)), status:'draft', createdBy:user.id, createdAt:now });
+      const quote = await dynamicWrite(client,'quotes',{ id:quoteId, quoteNumber, customerCompany:text(customer['companyName'],180), customerContact:text(customer['contactName'],180), customerPlace:text(customer['place'],180), quoteDate:text(customer['date'],10) || now.toISOString().slice(0,10), notes:text(customer['notes'],2000), subtotal:Number(subtotal.toFixed(2)), status:'draft', createdBy:user.id, createdAt:now });
       for (const line of lines) await dynamicWrite(client,'quote_lines',line);
       await client.query('COMMIT');
       await audit(user.id,'create','quote',quoteId,{quoteNumber,total:subtotal},event);
