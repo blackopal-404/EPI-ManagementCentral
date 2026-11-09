@@ -131,7 +131,7 @@ function mapWarehouseProduct(value: unknown): WarehouseProduct {
   const lead = pick(r,'leadTimeDays','lead_time_days');
   const safety = pick(r,'safetyStock','safety_stock');
   return {
-    id: stringValue(r['id']), productId: stringValue(pick(r,'productId','product_id')), productModelId: stringValue(pick(r,'productModelId','product_model_id')) || undefined,
+    id: stringValue(r['id']), productId: stringValue(pick(r,'productId','product_id')), ...(stringValue(pick(r,'productModelId','product_model_id')) ? { productModelId: stringValue(pick(r,'productModelId','product_model_id')) } : {}),
     sku: stringValue(r['sku']), name: stringValue(r['name']), description: stringValue(r['description']),
     image: stringValue(pick(r,'image','image_url')), quantity: numberValue(r['quantity']), minStock: numberValue(pick(r,'minStock','min_stock')),
     costPrice: numberValue(pick(r,'costPrice','cost_price')), salePrice: numberValue(pick(r,'salePrice','sale_price')),
@@ -472,16 +472,18 @@ export interface ProductModelRecord {
 }
 function mapProductModelRecord(row: Record<string, unknown>): ProductModelRecord {
   return {
-    id: stringValue(row.id), name: stringValue(row.name), brand: stringValue(row.brand),
-    model: stringValue(row.model), description: stringValue(row.description),
-    categoryId: stringValue(row.category_id), manufacturerId: stringValue(row.manufacturer_id),
-    equipmentType: stringValue(row.equipment_type), usage: stringValue(row.usage),
-    trackingMode: row.tracking_mode === "individual" ? "individual" : "quantity",
-    referenceSalePrice: numberValue(row.reference_sale_price), currency: (stringValue(row.currency,"HNL") as "HNL"|"USD"|"EUR"),
-    image: stringValue(row.image_url), features: arrayValue<string>(row.features),
-    specifications: arrayValue<import("@/types").SpecItem>(row.specifications),
-    materials: arrayValue<string>(row.materials), standards: arrayValue<string>(row.standards),
-    weight: stringValue(row.weight), dimensions: stringValue(row.dimensions), serviceLife: stringValue(row.service_life),
+    id: stringValue(row["id"]), name: stringValue(row["name"]), brand: stringValue(row["brand"]),
+    model: stringValue(row["model"]), description: stringValue(row["description"]),
+    categoryId: stringValue(row["category_id"]), manufacturerId: stringValue(row["manufacturer_id"]),
+    equipmentType: stringValue(row["equipment_type"]), usage: stringValue(row["usage"]),
+    trackingMode: row["tracking_mode"] === "individual" ? "individual" : "quantity",
+    referenceSalePrice: numberValue(row["reference_sale_price"]),
+    currency: stringValue(row["currency"], "HNL") as "HNL" | "USD" | "EUR",
+    image: stringValue(row["image_url"]), features: arrayValue<string>(row["features"]),
+    specifications: arrayValue<import("@/types").SpecItem>(row["specifications"]),
+    materials: arrayValue<string>(row["materials"]), standards: arrayValue<string>(row["standards"]),
+    weight: stringValue(row["weight"]), dimensions: stringValue(row["dimensions"]),
+    serviceLife: stringValue(row["service_life"]),
   };
 }
 

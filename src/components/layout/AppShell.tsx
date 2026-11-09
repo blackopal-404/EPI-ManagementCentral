@@ -2,7 +2,7 @@ import { useState, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { Link } from "@tanstack/react-router";
 import {
-  ClipboardCheck, FileBarChart, LayoutDashboard, Menu, Package, ScanLine,
+  Boxes, ClipboardCheck, FileBarChart, LayoutDashboard, Menu, Package, ScanLine,
   Search, Settings, LogOut, FileText, ShoppingCart, Users,
   ReceiptText, Printer, X, Building2,
 } from "lucide-react";
