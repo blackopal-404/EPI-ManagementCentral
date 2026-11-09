@@ -65,6 +65,7 @@ export function AdminShell({ children }: { children: ReactNode }) {
   const closeMenu = () => setOpen(false);
 
   return (
+    <>
     <div className="flex min-h-screen overflow-x-hidden bg-[linear-gradient(115deg,rgba(249,115,22,0.055),transparent_42%)]">
       <aside className="sticky top-0 hidden h-screen w-64 shrink-0 flex-col border-r-4 border-primary/70 bg-sidebar px-3 py-4 text-sidebar-foreground lg:flex">
         <div className="mb-4 flex items-center gap-2.5 border-b border-sidebar-border px-2 pb-4">
@@ -105,5 +106,6 @@ export function AdminShell({ children }: { children: ReactNode }) {
       <Link to="/scan" className="relative flex flex-col items-center gap-1 py-2.5 text-[11px] font-semibold text-primary"><span className="absolute -top-5 grid h-14 w-14 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg"><ScanLine className="h-6 w-6" /></span><span className="mt-5">Escanear</span></Link>
       <Link to="/admin/empresas" activeProps={{ className: "text-primary" }} inactiveProps={{ className: "text-muted-foreground" }} className="flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium"><Building2 className="h-5 w-5" />Empresas</Link>
     </nav>
+    </>
   );
 }
