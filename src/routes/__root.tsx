@@ -159,11 +159,14 @@ function AuthenticatedApp() {
     "/admin/cotizador":"quotes", "/admin/inventario":"inventory", "/admin/productos":"products",
     "/admin/categorias":"categories", "/admin/empresas":"companies", "/admin/equipos":"equipment",
     "/admin/inspecciones":"inspections", "/admin/reporte-inspecciones":"inspection_reports",
-    "/reportes":"reports", "/cotizaciones":"quotes", "/inventario":"inventory", "/productos":"products", "/categorias":"categories",
+    "/reportes":"reports", "/cotizaciones":"quotes", "/inventario":"equipment", "/productos":"products", "/categorias":"categories",
   };
   const requiredPermission = routePermission[pathname] ?? (pathname === "/admin" || pathname === "/admin/" ? "dashboard" : undefined);
   const hasDashboardAccess = (user.permissions ?? []).some(permission => permission !== "scanner");
-  const hasRouteAccess = fullAccess || (!!requiredPermission && (user.permissions ?? []).includes(requiredPermission)) || (requiredPermission === "dashboard" && hasDashboardAccess);
+  const productAreaPaths = ["/admin/productos", "/admin/bodega", "/admin/categorias"];
+  const hasProductAreaAccess = pathname === "/admin/productos"
+    && (user.permissions ?? []).some(permission => ["products", "warehouse", "categories"].includes(permission));
+  const hasRouteAccess = fullAccess || hasProductAreaAccess || (!!requiredPermission && (user.permissions ?? []).includes(requiredPermission)) || (requiredPermission === "dashboard" && hasDashboardAccess);
   if (isAdminOnly && !hasRouteAccess) return <Navigate to="/" replace />;
 
   return (

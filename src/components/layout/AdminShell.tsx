@@ -3,28 +3,26 @@ import { createPortal } from "react-dom";
 import { Link } from "@tanstack/react-router";
 import {
   ArrowLeft, Boxes, ClipboardCheck, FileBarChart, LayoutDashboard, Menu,
-  Package, Settings, ShieldCheck, Tag, Users, Warehouse, ShoppingCart,
+  Package, Settings, ShieldCheck, Users, ShoppingCart,
   LogOut, ReceiptText, ChevronRight, FileText, Printer, ScanLine, X, Building2,
 } from "lucide-react";
 import { useAuth } from "@/lib/auth";
 
 const administrativeNav = [
   { to: "/admin/ventas", label: "Ventas y carrito", icon: ReceiptText },
-  { to: "/admin/bodega", label: "Bodega", icon: Warehouse },
   { to: "/admin/plan-compras", label: "Planificador de compras", icon: ShoppingCart },
   { to: "/admin", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/admin/usuarios", label: "Usuarios", icon: Users },
   { to: "/admin/configuracion", label: "Configuración", icon: Settings },
   { to: "/admin/reportes", label: "Reportes", icon: FileBarChart },
   { to: "/admin/cotizador", label: "Cotizador", icon: FileText },
-  { to: "/admin/inventario", label: "Inventario", icon: Boxes },
-  { to: "/admin/productos", label: "Catálogo de productos", icon: Package },
-  { to: "/admin/categorias", label: "Categorías", icon: Tag },
+  { to: "/admin/productos", label: "Productos", icon: Package },
   { to: "/admin/empresas", label: "Empresas", icon: Building2 },
 ] as const;
 
 const teamNav = [
   { to: "/admin/equipos", label: "Equipos", icon: Boxes },
+  { to: "/inventario", label: "Inventario de equipos", icon: Boxes },
   { to: "/admin/inspecciones", label: "Inspecciones", icon: ClipboardCheck },
   { to: "/admin/reporte-inspecciones", label: "Imprimir reporte de inspección", icon: Printer },
   { to: "/scan", label: "Escáner de equipo", icon: ScanLine },
@@ -37,8 +35,10 @@ const inactiveLink = "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:t
 function NavList({ onNavigate, user }: { onNavigate?: () => void; user: ReturnType<typeof useAuth>["user"] }) {
   const isAdmin = user?.role === "magna" || user?.role === "administrador";
   const permissions = user?.permissions ?? [];
-  const visibleAdmin = administrativeNav.filter(item => isAdmin || permissions.includes(({ "/admin/ventas":"sales", "/admin/bodega":"warehouse", "/admin/plan-compras":"purchases", "/admin":"reports", "/admin/usuarios":"users", "/admin/configuracion":"settings", "/admin/reportes":"reports", "/admin/cotizador":"quotes", "/admin/inventario":"inventory", "/admin/productos":"products", "/admin/categorias":"categories", "/admin/empresas":"companies" } as Record<string,string>)[item.to] ?? ""));
-  const visibleTeam = teamNav.filter(item => isAdmin || permissions.includes(({ "/admin/equipos":"equipment", "/admin/inspecciones":"inspections", "/admin/reporte-inspecciones":"inspection_reports", "/scan":"scanner" } as Record<string,string>)[item.to] ?? ""));
+  const visibleAdmin = administrativeNav.filter(item => isAdmin || (item.to === "/admin/productos"
+    ? permissions.some(permission => ["products", "warehouse", "inventory", "categories"].includes(permission))
+    : permissions.includes(({ "/admin/ventas":"sales", "/admin/plan-compras":"purchases", "/admin":"reports", "/admin/usuarios":"users", "/admin/configuracion":"settings", "/admin/reportes":"reports", "/admin/cotizador":"quotes", "/admin/empresas":"companies" } as Record<string,string>)[item.to] ?? "")));
+  const visibleTeam = teamNav.filter(item => isAdmin || permissions.includes(({ "/admin/equipos":"equipment", "/inventario":"equipment", "/admin/inspecciones":"inspections", "/admin/reporte-inspecciones":"inspection_reports", "/scan":"scanner" } as Record<string,string>)[item.to] ?? ""));
   const renderLink = (item: (typeof administrativeNav)[number] | (typeof teamNav)[number]) => (
     <Link key={item.to} to={item.to} onClick={onNavigate}
       activeOptions={{ exact: "exact" in item ? item.exact : false }}
@@ -90,15 +90,20 @@ export function AdminShell({ children }: { children: ReactNode }) {
         <header className="sticky top-0 z-30 border-b-2 border-primary/55 bg-card/95 shadow-sm backdrop-blur">
           <div className="flex min-h-14 items-center gap-3 px-4 py-2 sm:px-6">
             <button type="button" onClick={() => setOpen(true)} className="grid h-9 w-9 shrink-0 place-items-center rounded-lg border border-border lg:hidden" aria-label="Abrir menú de administración" aria-expanded={open} aria-controls="admin-mobile-drawer"><Menu className="h-5 w-5" /></button>
-            <div className="flex min-w-0 items-center gap-2"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/12 text-primary"><ShieldCheck className="h-4 w-4" /></span><div className="min-w-0"><p className="truncate text-sm font-extrabold">Panel administrativo</p><p className="hidden text-[11px] text-muted-foreground sm:block">Bodega · Ventas · Compras · Gestión</p></div></div>
+            <div className="flex min-w-0 items-center gap-2"><span className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/12 text-primary"><ShieldCheck className="h-4 w-4" /></span><div className="min-w-0"><p className="truncate text-sm font-extrabold">Panel administrativo</p><p className="hidden text-[11px] text-muted-foreground sm:block">Productos · Ventas · Compras · Gestión</p></div></div>
             <span className="ml-auto inline-flex shrink-0 items-center gap-1.5 rounded-full border border-primary/30 bg-primary/10 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wider text-foreground sm:text-[11px]"><ShieldCheck className="h-3.5 w-3.5 text-primary" /> {user?.role === "magna" ? "Magna" : user?.role ?? "Usuario"}</span>
             <div className="hidden max-w-44 items-center gap-1 text-xs text-muted-foreground xl:flex"><span className="truncate">{user?.email}</span><ChevronRight className="h-3.5 w-3.5 shrink-0" /></div>
             <button type="button" onClick={logout} className="ml-1 hidden items-center gap-1.5 rounded-lg px-2.5 py-2 text-xs font-semibold text-muted-foreground hover:bg-muted hover:text-foreground sm:flex"><LogOut className="h-4 w-4" /><span className="hidden xl:inline">Salir</span></button>
           </div>
           <div className="flex items-center gap-2 bg-primary/[0.055] px-4 py-1.5 text-[11px] font-medium text-muted-foreground sm:px-6"><span className="h-1.5 w-1.5 rounded-full bg-primary" /> {import.meta.env.DEV ? "Zona administrativa: los movimientos se registran en el modo local de desarrollo." : "Zona administrativa: los cambios se guardan en PostgreSQL."}</div>
         </header>
-        <main className="min-w-0 flex-1 px-4 py-6 sm:px-6 sm:py-7">{children}</main>
+        <main className="min-w-0 flex-1 px-4 py-6 pb-24 sm:px-6 sm:py-7 lg:pb-7">{children}</main>
       </div>
     </div>
+    <nav aria-label="Navegación móvil" className="fixed inset-x-0 bottom-0 z-40 grid grid-cols-3 border-t border-border bg-card/95 backdrop-blur lg:hidden">
+      <Link to="/admin/equipos" activeProps={{ className: "text-primary" }} inactiveProps={{ className: "text-muted-foreground" }} className="flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium"><Boxes className="h-5 w-5" />Equipos</Link>
+      <Link to="/scan" className="relative flex flex-col items-center gap-1 py-2.5 text-[11px] font-semibold text-primary"><span className="absolute -top-5 grid h-14 w-14 place-items-center rounded-full bg-primary text-primary-foreground shadow-lg"><ScanLine className="h-6 w-6" /></span><span className="mt-5">Escanear</span></Link>
+      <Link to="/admin/empresas" activeProps={{ className: "text-primary" }} inactiveProps={{ className: "text-muted-foreground" }} className="flex flex-col items-center gap-1 py-2.5 text-[11px] font-medium"><Building2 className="h-5 w-5" />Empresas</Link>
+    </nav>
   );
 }

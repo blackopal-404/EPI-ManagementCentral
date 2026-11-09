@@ -131,7 +131,7 @@ function mapWarehouseProduct(value: unknown): WarehouseProduct {
   const lead = pick(r,'leadTimeDays','lead_time_days');
   const safety = pick(r,'safetyStock','safety_stock');
   return {
-    id: stringValue(r['id']), productId: stringValue(pick(r,'productId','product_id')),
+    id: stringValue(r['id']), productId: stringValue(pick(r,'productId','product_id')), productModelId: stringValue(pick(r,'productModelId','product_model_id')) || undefined,
     sku: stringValue(r['sku']), name: stringValue(r['name']), description: stringValue(r['description']),
     image: stringValue(pick(r,'image','image_url')), quantity: numberValue(r['quantity']), minStock: numberValue(pick(r,'minStock','min_stock')),
     costPrice: numberValue(pick(r,'costPrice','cost_price')), salePrice: numberValue(pick(r,'salePrice','sale_price')),
@@ -461,6 +461,49 @@ async function warehouseApi<T>(path: string, init: RequestInit = {}): Promise<T>
   if (!response.ok) throw new Error(payload.error || `Error del servidor (${response.status}).`);
   return (payload.data ?? payload) as T;
 }
+
+
+export interface ProductModelRecord {
+  id: string; name: string; brand: string; model: string; description: string;
+  categoryId?: string; manufacturerId?: string; equipmentType?: string; usage?: string;
+  trackingMode: "quantity" | "individual"; referenceSalePrice: number; currency: "HNL"|"USD"|"EUR";
+  image?: string; features?: string[]; specifications?: import("@/types").SpecItem[];
+  materials?: string[]; standards?: string[]; weight?: string; dimensions?: string; serviceLife?: string;
+}
+function mapProductModelRecord(row: Record<string, unknown>): ProductModelRecord {
+  return {
+    id: stringValue(row.id), name: stringValue(row.name), brand: stringValue(row.brand),
+    model: stringValue(row.model), description: stringValue(row.description),
+    categoryId: stringValue(row.category_id), manufacturerId: stringValue(row.manufacturer_id),
+    equipmentType: stringValue(row.equipment_type), usage: stringValue(row.usage),
+    trackingMode: row.tracking_mode === "individual" ? "individual" : "quantity",
+    referenceSalePrice: numberValue(row.reference_sale_price), currency: (stringValue(row.currency,"HNL") as "HNL"|"USD"|"EUR"),
+    image: stringValue(row.image_url), features: arrayValue<string>(row.features),
+    specifications: arrayValue<import("@/types").SpecItem>(row.specifications),
+    materials: arrayValue<string>(row.materials), standards: arrayValue<string>(row.standards),
+    weight: stringValue(row.weight), dimensions: stringValue(row.dimensions), serviceLife: stringValue(row.service_life),
+  };
+}
+
+export const productModelService = {
+  async getModels(): Promise<ProductModelRecord[]> {
+    if (import.meta.env.DEV) return delay(clone(readLocal("epi_product_models", [] as ProductModelRecord[])));
+    const rows = await warehouseApi<Record<string, unknown>[]>("/product-models");
+    return rows.map(mapProductModelRecord);
+  },
+  async saveModel(model: Omit<ProductModelRecord,"id"> & {id?:string}): Promise<ProductModelRecord> {
+    if (import.meta.env.DEV) {
+      const items = readLocal("epi_product_models", [] as ProductModelRecord[]);
+      const saved = { ...model, id: model.id || globalThis.crypto?.randomUUID?.() || `model-${Date.now()}` } as ProductModelRecord;
+      const index = items.findIndex(item => item.id === saved.id);
+      if (index >= 0) items[index] = saved; else items.unshift(saved);
+      writeLocal("epi_product_models", items);
+      return delay(clone(saved));
+    }
+    const row = await warehouseApi<Record<string, unknown>>("/product-models",{method:"POST",body:JSON.stringify(model)});
+    return mapProductModelRecord(row);
+  }
+};
 
 export const warehouseService = {
   async getProducts(): Promise<WarehouseProduct[]> {

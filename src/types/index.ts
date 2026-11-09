@@ -239,6 +239,8 @@ export interface DashboardMetrics {
 export interface WarehouseProduct {
   id: string;
   productId: string;
+  /** Modelo maestro compartido por todas las variantes/unidades de este SKU. */
+  productModelId?: string;
   sku: string;
   name: string;
   description?: string;

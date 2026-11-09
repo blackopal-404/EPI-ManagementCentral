@@ -341,6 +341,41 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
     const result = await db().query<{ record: Record<string, unknown> }>(`SELECT to_jsonb(m) AS record FROM manufacturers m ORDER BY to_jsonb(m)->>'name' LIMIT 500`);
     return json(200, { data: result.rows.map(row => row.record) });
   }
+  if (path === '/product-models' && event.httpMethod === 'GET') {
+    const result = await db().query(`SELECT pm.*, c.name AS category_name, m.name AS manufacturer_name
+      FROM product_models pm LEFT JOIN categories c ON c.id=pm.category_id
+      LEFT JOIN manufacturers m ON m.id=pm.manufacturer_id
+      WHERE pm.active=true ORDER BY pm.brand, pm.name, pm.model`);
+    return json(200, { data: result.rows });
+  }
+  if (path === '/product-models' && event.httpMethod === 'POST') {
+    if (!admin(user)) return json(403, { error: 'No tienes permiso para administrar el catálogo maestro.' });
+    const b = body(event); const id = text(b.id,100) || randomUUID();
+    const name=text(b.name,180), brand=text(b.brand,120), model=text(b.model,120);
+    const price=Number(b.referenceSalePrice ?? 0), currency=text(b.currency,3)||'HNL';
+    if(!name||!brand||!model||!Number.isFinite(price)||price<0||!['HNL','USD','EUR'].includes(currency))
+      return json(400,{error:'Completa nombre, marca, modelo y un precio válido.'});
+    const saved=await db().query(`INSERT INTO product_models
+      (id,name,brand,model,category_id,manufacturer_id,description,features,specifications,materials,standards,
+       equipment_type,usage,weight,dimensions,service_life,image_url,tracking_mode,reference_sale_price,currency,active,updated_at)
+      VALUES ($1,$2,$3,$4,NULLIF($5,''),NULLIF($6,''),$7,$8::jsonb,$9::jsonb,$10::jsonb,$11::jsonb,$12,$13,$14,$15,$16,$17,$18,$19,$20,true,now())
+      ON CONFLICT (id) DO UPDATE SET name=EXCLUDED.name,brand=EXCLUDED.brand,model=EXCLUDED.model,
+       category_id=EXCLUDED.category_id,manufacturer_id=EXCLUDED.manufacturer_id,description=EXCLUDED.description,
+       features=EXCLUDED.features,specifications=EXCLUDED.specifications,materials=EXCLUDED.materials,
+       standards=EXCLUDED.standards,equipment_type=EXCLUDED.equipment_type,usage=EXCLUDED.usage,
+       weight=EXCLUDED.weight,dimensions=EXCLUDED.dimensions,service_life=EXCLUDED.service_life,
+       image_url=EXCLUDED.image_url,tracking_mode=EXCLUDED.tracking_mode,
+       reference_sale_price=EXCLUDED.reference_sale_price,currency=EXCLUDED.currency,updated_at=now()
+      RETURNING *`,[id,name,brand,model,text(b.categoryId,100),text(b.manufacturerId,100),text(b.description,4000),
+       JSON.stringify(Array.isArray(b.features)?b.features:[]),JSON.stringify(Array.isArray(b.specifications)?b.specifications:[]),
+       JSON.stringify(Array.isArray(b.materials)?b.materials:[]),JSON.stringify(Array.isArray(b.standards)?b.standards:[]),
+       text(b.equipmentType,120),text(b.usage,300),text(b.weight,80),text(b.dimensions,120),text(b.serviceLife,120),
+       text(b.image,1800),b.trackingMode==='individual'?'individual':'quantity',price,currency]);
+    await db().query(`INSERT INTO product_price_history(product_model_id,price,currency,price_type,source,recorded_by)
+      VALUES($1,$2,$3,'sale','catalog-update',$4)`,[id,price,currency,user.id]);
+    await audit(user.id,'upsert','product_model',id,{name,brand,model,referenceSalePrice:price},event);
+    return json(200,{data:saved.rows[0]});
+  }
   if (path === '/products' && event.httpMethod === 'GET') {
     // Solo una sesión administrativa puede ejecutar la sincronización; la lectura pública nunca escribe.
     try { const catalogSession = await getSession(event); if (catalogSession && admin(catalogSession)) await syncWarehouseCatalogLinks(); } catch (error) { console.warn('Catalog sync deferred', error); }
@@ -391,7 +426,7 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
   if (!admin(user)) {
     const permissionByPath: Array<[RegExp,string]> = [
       [/^\/(equipment|equipment\/.+)/,'equipment'], [/^\/inspections/,'inspections'], [/^\/documents/,'documents'], [/^\/equipment\/history/,'equipment'],
-      [/^\/products/,'products'], [/^\/categories/,'categories'], [/^\/warehouse-products/,'warehouse'], [/^\/sales/,'sales'], [/^\/quotes/,'quotes'], [/^\/purchase-plans/,'purchases'], [/^\/reports/,'reports'], [/^\/users/,'users'], [/^\/roles/,'users'], [/^\/companies/,'companies'], [/^\/company-assignments/,'companies'], [/^\/settings/,'settings']
+      [/^\/products/,'products'], [/^\/product-models/,'products'], [/^\/categories/,'categories'], [/^\/warehouse-products/,'warehouse'], [/^\/sales/,'sales'], [/^\/quotes/,'quotes'], [/^\/purchase-plans/,'purchases'], [/^\/reports/,'reports'], [/^\/users/,'users'], [/^\/roles/,'users'], [/^\/companies/,'companies'], [/^\/company-assignments/,'companies'], [/^\/settings/,'settings']
     ];
     const required = permissionByPath.find(([pattern])=>pattern.test(path))?.[1];
     if (required) {
@@ -435,7 +470,7 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
   // Bodega: persistencia real de productos en PostgreSQL.
   if (path === '/warehouse-products' && event.httpMethod === 'GET') {
     if (!admin(user)) return json(403, { error: 'No tienes permiso para consultar la bodega.' });
-    const result = await db().query(`SELECT id, product_id AS "productId", sku, name, description,
+    const result = await db().query(`SELECT id, product_id AS "productId", product_model_id AS "productModelId", sku, name, description,
       image_url AS image, quantity, min_stock AS "minStock", cost_price AS "costPrice",
       sale_price AS "salePrice", location, supplier, lead_time_days AS "leadTimeDays",
       safety_stock AS "safetyStock", max_stock AS "maxStock",
@@ -464,16 +499,32 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
       await client.query('BEGIN');
       const sameSku = await client.query<{ id: string }>('SELECT id FROM warehouse_products WHERE sku = $1 LIMIT 1 FOR UPDATE', [sku]);
       if (sameSku.rows[0]) id = sameSku.rows[0].id;
-      const catalogProductId = await ensureCatalogProduct(client, { ...b, sku, name });
+      let modelDefaults: Record<string, unknown> = {};
+      const modelId = text(b.productModelId,100);
+      if (modelId) {
+        const modelResult = await client.query<Record<string, unknown>>(
+          'SELECT * FROM product_models WHERE id=$1 AND active=true LIMIT 1', [modelId]);
+        if (!modelResult.rows[0]) throw new Error('El modelo seleccionado ya no está disponible.');
+        const model = modelResult.rows[0];
+        modelDefaults = {
+          name: model['name'], description: model['description'], image: model['image_url'],
+          categoryId: model['category_id'], manufacturerId: model['manufacturer_id'],
+          model: model['model'], equipmentType: model['equipment_type'], usage: model['usage'],
+          features: model['features'], specifications: model['specifications'], materials: model['materials'],
+          standards: model['standards'], weight: model['weight'], dimensions: model['dimensions'],
+          serviceLife: model['service_life'],
+        };
+      }
+      const catalogProductId = await ensureCatalogProduct(client, { ...modelDefaults, ...b, sku, name: name || String(modelDefaults['name'] ?? '') });
       const previous = await client.query<{ quantity: number }>(
         'SELECT quantity FROM warehouse_products WHERE id = $1 FOR UPDATE', [id]);
       const previousQuantity = Number(previous.rows[0]?.quantity ?? 0);
       await client.query(`INSERT INTO warehouse_products
-        (id, product_id, sku, name, description, image_url, quantity, min_stock, cost_price, sale_price,
+        (id, product_id, product_model_id, sku, name, description, image_url, quantity, min_stock, cost_price, sale_price,
          location, supplier, lead_time_days, safety_stock, max_stock, min_purchase_quantity,
          purchase_multiple, daily_demand_estimate, demand_estimate_notes, currency, active, updated_at)
-        VALUES ($1, NULLIF($2,''), $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, now())
-        ON CONFLICT (id) DO UPDATE SET product_id=EXCLUDED.product_id, sku=EXCLUDED.sku, name=EXCLUDED.name,
+        VALUES ($1, NULLIF($2,''), NULLIF($3,''), $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, now())
+        ON CONFLICT (id) DO UPDATE SET product_id=EXCLUDED.product_id, product_model_id=EXCLUDED.product_model_id, sku=EXCLUDED.sku, name=EXCLUDED.name,
          description=EXCLUDED.description, image_url=EXCLUDED.image_url, min_stock=EXCLUDED.min_stock,
          cost_price=EXCLUDED.cost_price, sale_price=EXCLUDED.sale_price, location=EXCLUDED.location,
          supplier=EXCLUDED.supplier, lead_time_days=EXCLUDED.lead_time_days, safety_stock=EXCLUDED.safety_stock,
@@ -481,13 +532,13 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
          purchase_multiple=EXCLUDED.purchase_multiple, daily_demand_estimate=EXCLUDED.daily_demand_estimate,
          demand_estimate_notes=EXCLUDED.demand_estimate_notes, currency=EXCLUDED.currency,
          active=EXCLUDED.active, updated_at=now()
-        RETURNING id, product_id AS \"productId\", sku, name, description, image_url AS image, quantity,
+        RETURNING id, product_id AS \"productId\", product_model_id AS \"productModelId\", sku, name, description, image_url AS image, quantity,
          min_stock AS \"minStock\", cost_price AS \"costPrice\", sale_price AS \"salePrice\", location, supplier,
          lead_time_days AS \"leadTimeDays\", safety_stock AS \"safetyStock\", max_stock AS \"maxStock\",
          min_purchase_quantity AS \"minPurchaseQuantity\", purchase_multiple AS \"purchaseMultiple\",
          daily_demand_estimate AS \"dailyDemandEstimate\", demand_estimate_notes AS \"demandEstimateNotes\",
          currency, active, updated_at::date::text AS \"updatedAt\"`, [
-          id, catalogProductId, sku, name, text(b.description,2000), text(b.image,2_000_000), quantity,
+          id, catalogProductId, text(b.productModelId,100), sku, name, text(b.description,2000), text(b.image,2_000_000), quantity,
           minStock, costPrice, salePrice, text(b.location,200), text(b.supplier,200),
           Math.max(0, Number(b.leadTimeDays ?? 30)), Math.max(0, Number(b.safetyStock ?? 0)),
           b.maxStock === null || b.maxStock === undefined || b.maxStock === '' ? null : Math.max(0, Number(b.maxStock)),
@@ -495,6 +546,15 @@ async function handle(event: HandlerEvent): Promise<HandlerResponse> {
           b.dailyDemandEstimate === null || b.dailyDemandEstimate === undefined || b.dailyDemandEstimate === '' ? null : Math.max(0, Number(b.dailyDemandEstimate)),
           text(b.demandEstimateNotes,2000), text(b.currency,3) || 'HNL', b.active !== false,
         ]);
+      if (modelId) {
+        const previousModelPrice = await client.query<{reference_sale_price:string}>(
+          'SELECT reference_sale_price FROM product_models WHERE id=$1 FOR UPDATE',[modelId]);
+        if (Number(previousModelPrice.rows[0]?.reference_sale_price ?? -1) !== salePrice) {
+          await client.query('UPDATE product_models SET reference_sale_price=$2,currency=$3,updated_at=now() WHERE id=$1',[modelId,salePrice,text(b.currency,3)||'HNL']);
+          await client.query(`INSERT INTO product_price_history(product_model_id,price,currency,price_type,source,recorded_by)
+            VALUES($1,$2,$3,'sale','warehouse-product-update',$4)`,[modelId,salePrice,text(b.currency,3)||'HNL',user.id]);
+        }
+      }
       const delta = quantity - previousQuantity;
       if (delta !== 0) {
         await client.query(`INSERT INTO inventory_movements
