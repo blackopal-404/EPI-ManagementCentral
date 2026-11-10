@@ -87,7 +87,7 @@ function AdminEquipment() {
         </button>
       </header>
 
-      <SectionCard title={`${data.length} unidades`} description={import.meta.env.DEV ? "Los datos de demostración se guardan localmente." : "Los equipos se guardan en PostgreSQL y se relacionan con el catálogo de productos."}>
+      <SectionCard title={`${data.length} unidades`} description={import.meta.env.DEV ? "Los cambios se guardan localmente en este entorno." : "Los equipos se guardan en PostgreSQL y se relacionan con el catálogo de productos."}>
         <EquipmentTable equipment={data} onEdit={setEditing} onDelete={remove} />
       </SectionCard>
 

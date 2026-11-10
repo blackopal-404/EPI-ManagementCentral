@@ -17,7 +17,7 @@ function ReportsPage() {
     setBusy(id + format);
     try {
       await reportService.export(id, format);
-      alert(import.meta.env.DEV ? `Exportación de demostración preparada en formato ${format.toUpperCase()}.` : format === "excel" ? "Se descargó el reporte en CSV, compatible con Excel." : "Se abrió el reporte para imprimirlo o guardarlo como PDF.");
+      alert(import.meta.env.DEV ? `Exportación preparada en formato ${format.toUpperCase()}.` : format === "excel" ? "Se descargó el reporte en CSV, compatible con Excel." : "Se abrió el reporte para imprimirlo o guardarlo como PDF.");
     } finally {
       setBusy(null);
     }

@@ -1,8 +1,8 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, ArrowRight, ScanLine } from "lucide-react";
-import { codeService, equipmentService, productService } from "@/services";
+import { AlertTriangle, ArrowRight } from "lucide-react";
+import { equipmentService, productService } from "@/services";
 import { EquipmentStatusBadge } from "@/components/common/StatusBadge";
 import { CameraQrScanner } from "@/components/qr/CameraQrScanner";
 
@@ -11,7 +11,6 @@ export const Route = createFileRoute("/scan")({ component: ScanPage });
 function ScanPage() {
   const [raw, setRaw] = useState("");
   const [result, setResult] = useState<any>();
-  const [scanning, setScanning] = useState(false);
   const [format, setFormat] = useState<string | null>(null);
   const { data: products = [] } = useQuery({ queryKey: ["products"], queryFn: () => productService.getProducts() });
 
@@ -21,13 +20,7 @@ function ScanPage() {
     setResult(await equipmentService.getEquipmentByScanCode(value));
   }
 
-  async function demo() {
-    setScanning(true);
-    setFormat("QR (demo)");
-    const code = await codeService.scan();
-    await lookup(code, "QR (demo)");
-    setScanning(false);
-  }
+
 
   return (
     <div className="mx-auto max-w-3xl space-y-5">
@@ -51,21 +44,6 @@ function ScanPage() {
 
         <div className="my-5 flex items-center gap-3">
           <div className="h-px flex-1 bg-border" />
-          <span className="text-xs text-muted-foreground">o usa una simulación</span>
-          <div className="h-px flex-1 bg-border" />
-        </div>
-
-        {import.meta.env.DEV && <button
-          onClick={demo}
-          disabled={scanning}
-          className="flex w-full items-center justify-center gap-2 rounded-md border border-border px-4 py-3 text-sm font-bold hover:bg-muted disabled:opacity-50"
-        >
-          <ScanLine className="h-4 w-4" />
-          {scanning ? "Identificando…" : "Simular identificación"}
-        </button>}
-
-        <div className="my-5 flex items-center gap-3">
-          <div className="h-px flex-1 bg-border" />
           <span className="text-xs text-muted-foreground">o introduce el contenido</span>
           <div className="h-px flex-1 bg-border" />
         </div>
@@ -74,7 +52,7 @@ function ScanPage() {
           <input
             value={raw}
             onChange={(e) => setRaw(e.target.value)}
-            placeholder="Número de serie, Data Matrix, EQUIPMENT:ARN-0001 o ARN-0001"
+            placeholder="Número de serie, Data Matrix o código interno"
             className="h-10 min-w-0 flex-1 rounded-md border border-input px-3 text-sm"
           />
           <button
@@ -85,22 +63,6 @@ function ScanPage() {
           </button>
         </div>
 
-        <div className="mt-5 rounded-lg border border-border bg-muted/30 p-4">
-          <div className="flex flex-col items-center gap-3 sm:flex-row">
-            <img
-              src="/qr-demo-arn-0001.png"
-              alt="Código QR de prueba EQUIPMENT:ARN-0001"
-              className="h-28 w-28 rounded bg-white p-2"
-            />
-            <div>
-              <p className="text-sm font-bold">QR de prueba</p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Este QR mantiene la prueba del lector existente. En producción, el mismo lector acepta Data Matrix y puede usar su número de serie para localizar el equipo.
-              </p>
-              <p className="mono-code mt-2 text-[11px]">EQUIPMENT:ARN-0001</p>
-            </div>
-          </div>
-        </div>
       </section>
 
       {raw && result === undefined && (

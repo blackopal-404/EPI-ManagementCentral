@@ -1,4 +1,4 @@
-# Preparación de producción — EPIControl
+# Preparación de producción — EPI Management Central
 
 ## Estado real de esta entrega
 

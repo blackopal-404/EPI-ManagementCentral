@@ -200,7 +200,7 @@ export function EntityCrud<T>({
             <DialogDescription>
               {mode === "view"
                 ? "Vista de solo lectura con los datos simulados del registro."
-                : "Formulario de demostración: los datos no se envían a ningún servidor."}
+                : "Los datos de este formulario se conservan únicamente en este entorno."}
             </DialogDescription>
           </DialogHeader>
 
