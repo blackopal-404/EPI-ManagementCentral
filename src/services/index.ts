@@ -472,18 +472,16 @@ export interface ProductModelRecord {
 }
 function mapProductModelRecord(row: Record<string, unknown>): ProductModelRecord {
   return {
-    id: stringValue(row["id"]), name: stringValue(row["name"]), brand: stringValue(row["brand"]),
-    model: stringValue(row["model"]), description: stringValue(row["description"]),
-    categoryId: stringValue(row["category_id"]), manufacturerId: stringValue(row["manufacturer_id"]),
-    equipmentType: stringValue(row["equipment_type"]), usage: stringValue(row["usage"]),
-    trackingMode: row["tracking_mode"] === "individual" ? "individual" : "quantity",
-    referenceSalePrice: numberValue(row["reference_sale_price"]),
-    currency: stringValue(row["currency"], "HNL") as "HNL" | "USD" | "EUR",
-    image: stringValue(row["image_url"]), features: arrayValue<string>(row["features"]),
-    specifications: arrayValue<import("@/types").SpecItem>(row["specifications"]),
-    materials: arrayValue<string>(row["materials"]), standards: arrayValue<string>(row["standards"]),
-    weight: stringValue(row["weight"]), dimensions: stringValue(row["dimensions"]),
-    serviceLife: stringValue(row["service_life"]),
+    id: stringValue(row['id']), name: stringValue(row['name']), brand: stringValue(row['brand']),
+    model: stringValue(row['model']), description: stringValue(row['description']),
+    categoryId: stringValue(row['category_id']), manufacturerId: stringValue(row['manufacturer_id']),
+    equipmentType: stringValue(row['equipment_type']), usage: stringValue(row['usage']),
+    trackingMode: row['tracking_mode'] === "individual" ? "individual" : "quantity",
+    referenceSalePrice: numberValue(row['reference_sale_price']), currency: (stringValue(row['currency'],"HNL") as "HNL"|"USD"|"EUR"),
+    image: stringValue(row['image_url']), features: arrayValue<string>(row['features']),
+    specifications: arrayValue<import("@/types").SpecItem>(row['specifications']),
+    materials: arrayValue<string>(row['materials']), standards: arrayValue<string>(row['standards']),
+    weight: stringValue(row['weight']), dimensions: stringValue(row['dimensions']), serviceLife: stringValue(row['service_life']),
   };
 }
 

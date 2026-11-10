@@ -46,10 +46,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-screen">
       <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 flex-col overflow-hidden bg-gradient-to-b from-sidebar via-sidebar to-sidebar text-sidebar-foreground lg:flex">
         <div className="relative z-10 flex min-h-0 flex-1 flex-col">
-          <div className="border-b border-white/15 px-5 py-5">
-            <Link to="/" className="block">
-              <img src="/vertical-safety-logo.png" alt="Vertical Safety" className="h-auto w-full max-w-[205px] object-contain object-left brightness-110" />
-              <p className="mt-2 text-[9px] font-semibold uppercase tracking-[0.14em] text-white/65">EPIControl · Gestión de EPI</p>
+          <div className="border-b border-white/15 px-5 py-4">
+            <Link to="/" className="flex flex-col items-center gap-2">
+              <img src="/epi-management-central-logo.png" alt="EPI Management Central" className="h-32 w-32 object-contain" />
+              <span className="text-center text-[10px] font-bold uppercase tracking-[0.16em] text-white/70">Gestión central de EPI</span>
             </Link>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto px-3 py-5"><NavLinks user={user} /></div>
@@ -66,8 +66,8 @@ export function AppShell({ children }: { children: ReactNode }) {
             <div className="hidden shrink-0 lg:block"><Link to="/"><img src="/vertical-safety-logo.png" alt="Vertical Safety" className="h-11 w-[205px] object-contain object-left" /></Link></div>
             <Sheet open={menuOpen} onOpenChange={setMenuOpen}><SheetTrigger className="grid h-10 w-10 shrink-0 place-items-center rounded-lg border border-border lg:hidden" aria-label="Abrir menú"><Menu className="h-5 w-5" /></SheetTrigger><SheetContent side="left" className="z-[100] flex h-dvh max-h-dvh w-[85vw] max-w-xs flex-col overflow-hidden bg-gradient-to-b from-sidebar via-sidebar to-sidebar p-0 text-sidebar-foreground shadow-2xl">
               <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-6 pt-5">
-                <SheetHeader className="mb-5"><SheetTitle className="text-left text-white">EPIControl</SheetTitle></SheetHeader>
-                <img src="/vertical-safety-logo.png" alt="Vertical Safety" className="mb-5 w-full max-w-[210px] brightness-110" />
+                <SheetHeader className="mb-3"><SheetTitle className="text-left text-white">Menú principal</SheetTitle></SheetHeader>
+                <img src="/epi-management-central-logo.png" alt="EPI Management Central" className="mx-auto mb-5 h-28 w-28 object-contain" />
                 <NavLinks user={user} onNavigate={() => setMenuOpen(false)} />
                 <div className="mt-6 rounded-xl border border-white/10 bg-white/5 p-3"><p className="text-xs font-bold tracking-wide text-white/90">ALTURA · SEGURIDAD · CONFIANZA</p><div className="mt-3 h-1 w-12 rounded-full bg-primary" /><p className="mt-3 text-[11px] leading-5 text-white/65">Trabajamos por un mundo más seguro.</p></div>
               </div>
